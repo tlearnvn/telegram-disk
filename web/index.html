@@ -1,3 +1,390 @@
 <!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#0f172a">
 <title>Tuấn's Telegram Disk</title>
-<p>Giao diện đang được dựng.</p>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='24' fill='%232f7fe8'/%3E%3Cpath d='M22 52l52-24-9 46-16-12-8 10-4-14z' fill='white'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+
+<!-- ══════════════ Màn hình đăng nhập ══════════════ -->
+<div id="man-hinh-dang-nhap" class="login-screen hidden">
+  <div class="login-bg" aria-hidden="true"><span></span><span></span><span></span></div>
+  <form class="login-card" id="form-dang-nhap" autocomplete="on">
+    <div class="login-logo" aria-hidden="true">
+      <svg viewBox="0 0 100 100"><rect width="100" height="100" rx="24"/><path d="M22 52l52-24-9 46-16-12-8 10-4-14z"/></svg>
+    </div>
+    <h1>Tuấn's Telegram Disk</h1>
+    <p class="login-sub">Ổ đĩa lưu trữ không giới hạn trên nền Telegram</p>
+
+    <label class="field">
+      <span>Tên đăng nhập</span>
+      <input type="text" id="dn-ten" name="username" autocomplete="username" required autofocus>
+    </label>
+    <label class="field">
+      <span>Mật khẩu</span>
+      <span class="pw-wrap">
+        <input type="password" id="dn-matkhau" name="password" autocomplete="current-password" required>
+        <button type="button" class="pw-toggle" id="dn-hien" aria-label="Hiện mật khẩu">👁</button>
+      </span>
+    </label>
+
+    <div class="login-error" id="dn-loi" role="alert" hidden></div>
+    <button type="submit" class="btn btn-primary btn-block" id="dn-nut">Đăng nhập</button>
+
+    <p class="login-hint">Lần chạy đầu tiên, mật khẩu quản trị được in trong cửa sổ dòng lệnh của máy chủ.</p>
+    <p class="login-footer">Thiết kế bởi Tuandethuong.</p>
+  </form>
+</div>
+
+<!-- ══════════════ Ứng dụng chính ══════════════ -->
+<div id="ung-dung" class="app hidden">
+
+  <!-- ─── Thanh bên ─── -->
+  <aside class="sidebar" id="thanh-ben">
+    <div class="brand">
+      <svg class="brand-mark" viewBox="0 0 100 100" aria-hidden="true"><rect width="100" height="100" rx="24"/><path d="M22 52l52-24-9 46-16-12-8 10-4-14z"/></svg>
+      <div class="brand-text">
+        <strong>Tuấn's</strong>
+        <span>Telegram Disk</span>
+      </div>
+      <button class="icon-btn sidebar-close" id="nut-dong-thanh-ben" aria-label="Đóng menu">✕</button>
+    </div>
+
+    <button class="btn btn-primary btn-upload" id="nut-tai-len">
+      <svg viewBox="0 0 24 24" class="ico"><path d="M12 16V4m0 0L7 9m5-5l5 5M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2"/></svg>
+      Tải tệp lên
+    </button>
+
+    <nav class="nav" id="dieu-huong">
+      <a href="#" class="nav-item active" data-view="tep">
+        <svg viewBox="0 0 24 24" class="ico"><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg>
+        <span>Tệp của tôi</span>
+      </a>
+      <a href="#" class="nav-item" data-view="danh-dau">
+        <svg viewBox="0 0 24 24" class="ico"><path d="M12 3l2.9 5.9 6.5.9-4.7 4.6 1.1 6.5L12 17.8 6.2 20.9l1.1-6.5L2.6 9.8l6.5-.9z"/></svg>
+        <span>Đánh dấu sao</span>
+      </a>
+      <a href="#" class="nav-item" data-view="tai-len">
+        <svg viewBox="0 0 24 24" class="ico"><path d="M12 16V4m0 0L7 9m5-5l5 5M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2"/></svg>
+        <span>Đang tải lên</span>
+        <em class="badge" id="badge-tai-len" hidden>0</em>
+      </a>
+      <a href="#" class="nav-item" data-view="thung-rac">
+        <svg viewBox="0 0 24 24" class="ico"><path d="M4 7h16M9 7V5a1 1 0 011-1h4a1 1 0 011 1v2m2 0v12a2 2 0 01-2 2H8a2 2 0 01-2-2V7"/></svg>
+        <span>Thùng rác</span>
+      </a>
+      <hr class="nav-sep">
+      <a href="#" class="nav-item" data-view="thong-ke">
+        <svg viewBox="0 0 24 24" class="ico"><path d="M4 20V10m6 10V4m6 16v-7m-12 7h18"/></svg>
+        <span>Thống kê</span>
+      </a>
+      <a href="#" class="nav-item" data-view="nhat-ky">
+        <svg viewBox="0 0 24 24" class="ico"><path d="M5 4h14v16H5zM8 8h8M8 12h8M8 16h5"/></svg>
+        <span>Nhật ký</span>
+      </a>
+      <a href="#" class="nav-item admin-only" data-view="tai-khoan">
+        <svg viewBox="0 0 24 24" class="ico"><path d="M21 12a9 9 0 11-18 0 9 9 0 0118 0zM8 12l3 3 5-6"/></svg>
+        <span>Tài khoản Telegram</span>
+      </a>
+      <a href="#" class="nav-item admin-only" data-view="nguoi-dung">
+        <svg viewBox="0 0 24 24" class="ico"><path d="M16 20v-2a4 4 0 00-4-4H6a4 4 0 00-4 4v2M9 8a3 3 0 100-6 3 3 0 000 6zm13 12v-2a4 4 0 00-3-3.9M16 3.1a4 4 0 010 7.8"/></svg>
+        <span>Người dùng</span>
+      </a>
+      <a href="#" class="nav-item admin-only" data-view="cai-dat">
+        <svg viewBox="0 0 24 24" class="ico"><path d="M12 15a3 3 0 100-6 3 3 0 000 6z"/><path d="M19.4 15a1.7 1.7 0 00.3 1.9l.1.1a2 2 0 11-2.8 2.8l-.1-.1a1.7 1.7 0 00-1.9-.3 1.7 1.7 0 00-1 1.5V21a2 2 0 11-4 0v-.1A1.7 1.7 0 008.9 19a1.7 1.7 0 00-1.9.3l-.1.1a2 2 0 11-2.8-2.8l.1-.1a1.7 1.7 0 00.3-1.9 1.7 1.7 0 00-1.5-1H3a2 2 0 110-4h.1A1.7 1.7 0 004.6 8.9a1.7 1.7 0 00-.3-1.9l-.1-.1a2 2 0 112.8-2.8l.1.1a1.7 1.7 0 001.9.3H9a1.7 1.7 0 001-1.5V3a2 2 0 114 0v.1a1.7 1.7 0 001 1.5 1.7 1.7 0 001.9-.3l.1-.1a2 2 0 112.8 2.8l-.1.1a1.7 1.7 0 00-.3 1.9V9a1.7 1.7 0 001.5 1H21a2 2 0 110 4h-.1a1.7 1.7 0 00-1.5 1z"/></svg>
+        <span>Cài đặt</span>
+      </a>
+    </nav>
+
+    <div class="storage-card" id="the-dung-luong">
+      <div class="storage-head">
+        <span>Dung lượng đã dùng</span>
+        <strong id="dl-tong">—</strong>
+      </div>
+      <div class="storage-bar"><i id="dl-thanh" style="width:0%"></i></div>
+      <div class="storage-meta">
+        <span id="dl-so-tep">— tệp</span>
+        <span id="dl-nguon">—</span>
+      </div>
+    </div>
+
+    <div class="sidebar-foot">
+      <div class="version-line">
+        <span id="pb-ten">Tuấn's Telegram Disk</span>
+        <span class="version-chip" id="pb-so">v—</span>
+      </div>
+      <div class="footer-credit">Thiết kế bởi Tuandethuong.</div>
+    </div>
+  </aside>
+
+  <div class="sidebar-scrim" id="lop-phu-thanh-ben"></div>
+
+  <!-- ─── Khu vực chính ─── -->
+  <main class="main">
+    <header class="topbar">
+      <button class="icon-btn only-mobile" id="nut-mo-thanh-ben" aria-label="Mở menu">
+        <svg viewBox="0 0 24 24" class="ico"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
+      </button>
+
+      <div class="breadcrumb" id="duong-dan"></div>
+
+      <div class="search">
+        <svg viewBox="0 0 24 24" class="ico"><path d="M21 21l-4.3-4.3M17 11a6 6 0 11-12 0 6 6 0 0112 0z"/></svg>
+        <input type="search" id="o-tim-kiem" placeholder="Tìm tệp và thư mục…" autocomplete="off">
+      </div>
+
+      <div class="topbar-actions">
+        <button class="icon-btn" id="nut-doi-giao-dien" title="Đổi giao diện sáng/tối" aria-label="Đổi giao diện">
+          <svg viewBox="0 0 24 24" class="ico" id="ico-giao-dien"><path d="M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z"/></svg>
+        </button>
+        <div class="user-menu">
+          <button class="user-btn" id="nut-nguoi-dung">
+            <span class="avatar" id="chu-cai-dau">?</span>
+            <span class="user-name" id="ten-hien-thi">…</span>
+            <svg viewBox="0 0 24 24" class="ico caret"><path d="M6 9l6 6 6-6"/></svg>
+          </button>
+          <div class="dropdown" id="menu-nguoi-dung" hidden>
+            <div class="dropdown-head">
+              <strong id="menu-ten">…</strong>
+              <small id="menu-vaitro">…</small>
+            </div>
+            <button class="dropdown-item" data-action="doi-mat-khau">
+              <svg viewBox="0 0 24 24" class="ico"><path d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zM8 11V7a4 4 0 018 0v4"/></svg>
+              Đổi mật khẩu
+            </button>
+            <button class="dropdown-item" data-action="webdav">
+              <svg viewBox="0 0 24 24" class="ico"><path d="M4 6h16M4 12h16M4 18h10"/></svg>
+              Hướng dẫn WebDAV
+            </button>
+            <button class="dropdown-item danger" data-action="dang-xuat">
+              <svg viewBox="0 0 24 24" class="ico"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4m7 14l5-5-5-5m5 5H9"/></svg>
+              Đăng xuất
+            </button>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <!-- Thanh công cụ -->
+    <div class="toolbar" id="thanh-cong-cu">
+      <div class="toolbar-left">
+        <button class="btn btn-ghost" id="nut-thu-muc-moi">
+          <svg viewBox="0 0 24 24" class="ico"><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><path d="M12 11v5m-2.5-2.5h5"/></svg>
+          Thư mục mới
+        </button>
+        <span class="sel-info" id="thong-tin-chon" hidden></span>
+        <div class="sel-actions" id="hanh-dong-chon" hidden>
+          <button class="btn btn-ghost" data-op="tai-xuong">Tải xuống</button>
+          <button class="btn btn-ghost" data-op="di-chuyen">Di chuyển</button>
+          <button class="btn btn-ghost" data-op="sao-chep">Sao chép</button>
+          <button class="btn btn-ghost danger" data-op="xoa">Xoá</button>
+          <button class="btn btn-ghost" data-op="bo-chon">Bỏ chọn</button>
+        </div>
+      </div>
+      <div class="toolbar-right">
+        <select id="chon-sap-xep" class="select" aria-label="Sắp xếp">
+          <option value="name">Tên</option>
+          <option value="modified">Ngày sửa</option>
+          <option value="created">Ngày tạo</option>
+          <option value="size">Kích thước</option>
+          <option value="type">Loại</option>
+        </select>
+        <button class="icon-btn" id="nut-thu-tu" title="Đảo thứ tự" aria-label="Đảo thứ tự">
+          <svg viewBox="0 0 24 24" class="ico"><path d="M7 4v16m0 0l-3-3m3 3l3-3M17 20V4m0 0l-3 3m3-3l3 3"/></svg>
+        </button>
+        <div class="segmented">
+          <button class="seg active" id="nut-che-do-luoi" title="Dạng lưới" aria-label="Dạng lưới">
+            <svg viewBox="0 0 24 24" class="ico"><path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z"/></svg>
+          </button>
+          <button class="seg" id="nut-che-do-danh-sach" title="Dạng danh sách" aria-label="Dạng danh sách">
+            <svg viewBox="0 0 24 24" class="ico"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Vùng nội dung -->
+    <section class="content" id="noi-dung">
+
+      <!-- Trang: Tệp -->
+      <div class="view" id="view-tep">
+        <div class="dropzone" id="vung-tha">
+          <div class="dropzone-inner">
+            <svg viewBox="0 0 24 24" class="ico big"><path d="M12 16V4m0 0L7 9m5-5l5 5M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2"/></svg>
+            <strong>Thả tệp vào đây để tải lên</strong>
+          </div>
+        </div>
+        <div id="danh-sach-tep" class="files grid"></div>
+        <div class="empty" id="trong-rong" hidden>
+          <svg viewBox="0 0 24 24" class="ico big"><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg>
+          <h3>Chưa có gì ở đây</h3>
+          <p>Kéo thả tệp vào đây, hoặc bấm “Tải tệp lên” để bắt đầu.</p>
+        </div>
+        <div class="pager" id="phan-trang" hidden>
+          <button class="btn btn-ghost" id="nut-trang-truoc">← Trước</button>
+          <span id="thong-tin-trang"></span>
+          <button class="btn btn-ghost" id="nut-trang-sau">Sau →</button>
+        </div>
+      </div>
+
+      <!-- Trang: Đang tải lên -->
+      <div class="view hidden" id="view-tai-len">
+        <div class="panel">
+          <div class="panel-head">
+            <h2>Phiên tải lên đang chạy</h2>
+            <button class="btn btn-ghost" id="nut-huy-tat-ca">Huỷ tất cả</button>
+          </div>
+          <div id="danh-sach-tai-len" class="upload-list"></div>
+          <div class="empty small" id="tai-len-trong">
+            <p>Không có phiên tải lên nào đang chạy.</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Trang: Thùng rác -->
+      <div class="view hidden" id="view-thung-rac">
+        <div class="panel">
+          <div class="panel-head">
+            <h2>Thùng rác</h2>
+            <div>
+              <span class="muted" id="thung-rac-mo-ta"></span>
+              <button class="btn btn-ghost danger" id="nut-don-thung-rac">Dọn sạch thùng rác</button>
+            </div>
+          </div>
+          <div id="danh-sach-thung-rac" class="files list"></div>
+          <div class="empty small" id="thung-rac-trong"><p>Thùng rác đang trống.</p></div>
+        </div>
+      </div>
+
+      <!-- Trang: Thống kê -->
+      <div class="view hidden" id="view-thong-ke">
+        <div class="stat-grid" id="luoi-thong-ke"></div>
+        <div class="panel">
+          <div class="panel-head"><h2>Chi tiết hệ thống</h2></div>
+          <div class="kv-grid" id="chi-tiet-he-thong"></div>
+        </div>
+      </div>
+
+      <!-- Trang: Nhật ký -->
+      <div class="view hidden" id="view-nhat-ky">
+        <div class="panel">
+          <div class="panel-head">
+            <h2>Nhật ký hệ thống</h2>
+            <div class="log-controls">
+              <select id="loc-muc" class="select">
+                <option value="trace">Tất cả</option>
+                <option value="debug">Gỡ lỗi trở lên</option>
+                <option value="info" selected>Thông tin trở lên</option>
+                <option value="warn">Cảnh báo trở lên</option>
+                <option value="error">Chỉ lỗi</option>
+              </select>
+              <input type="search" id="loc-tu-khoa" class="input" placeholder="Lọc theo từ khoá…">
+              <label class="switch"><input type="checkbox" id="tu-cuon" checked><span>Tự cuộn</span></label>
+              <button class="btn btn-ghost" id="nut-xoa-nhat-ky">Xoá màn hình</button>
+            </div>
+          </div>
+          <div class="log-view" id="khung-nhat-ky"></div>
+        </div>
+      </div>
+
+      <!-- Trang: Tài khoản Telegram -->
+      <div class="view hidden" id="view-tai-khoan">
+        <div class="panel">
+          <div class="panel-head">
+            <h2>Tài khoản Telegram</h2>
+            <div>
+              <button class="btn btn-ghost" id="nut-ket-noi-lai">Kết nối lại tất cả</button>
+              <button class="btn btn-primary" id="nut-them-tai-khoan">＋ Thêm tài khoản</button>
+            </div>
+          </div>
+          <p class="muted panel-note">
+            Dùng nhiều tài khoản trong cùng một siêu nhóm giúp chia tải khi tải lên và
+            giảm nguy cơ bị Telegram giới hạn tần suất. Mỗi mảnh dữ liệu được giao cho
+            tài khoản đang rảnh nhất.
+          </p>
+          <div id="danh-sach-tai-khoan" class="account-list"></div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head"><h2>Siêu nhóm lưu trữ</h2></div>
+          <p class="muted panel-note">
+            Toàn bộ mảnh dữ liệu được gửi vào siêu nhóm này. Hãy tạo một siêu nhóm riêng,
+            đặt ở chế độ riêng tư và thêm tất cả tài khoản ở trên vào nhóm.
+          </p>
+          <div class="row">
+            <input type="text" id="o-sieu-nhom" class="input grow" placeholder="@ten_sieu_nhom, t.me/…, hoặc mã số nhóm">
+            <button class="btn btn-ghost" id="nut-liet-ke-nhom">Liệt kê nhóm</button>
+            <button class="btn btn-primary" id="nut-luu-sieu-nhom">Lưu</button>
+          </div>
+          <div id="ket-qua-nhom" class="group-list"></div>
+          <div class="current-group" id="nhom-hien-tai"></div>
+        </div>
+      </div>
+
+      <!-- Trang: Người dùng -->
+      <div class="view hidden" id="view-nguoi-dung">
+        <div class="panel">
+          <div class="panel-head">
+            <h2>Người dùng</h2>
+            <button class="btn btn-primary" id="nut-them-nguoi-dung">＋ Thêm người dùng</button>
+          </div>
+          <div class="table-wrap">
+            <table class="table" id="bang-nguoi-dung">
+              <thead><tr>
+                <th>Tên đăng nhập</th><th>Tên hiển thị</th><th>Vai trò</th>
+                <th>Đã dùng</th><th>Hạn mức</th><th>Đăng nhập gần nhất</th><th></th>
+              </tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- Trang: Cài đặt -->
+      <div class="view hidden" id="view-cai-dat">
+        <div id="khung-cai-dat"></div>
+      </div>
+
+    </section>
+  </main>
+</div>
+
+<!-- ══════════════ Thành phần dùng chung ══════════════ -->
+<div class="toast-stack" id="khay-thong-bao"></div>
+
+<div class="modal-root" id="goc-hop-thoai" hidden>
+  <div class="modal-scrim" id="lop-phu-hop-thoai"></div>
+  <div class="modal" id="hop-thoai" role="dialog" aria-modal="true">
+    <div class="modal-head">
+      <h3 id="tieu-de-hop-thoai">Tiêu đề</h3>
+      <button class="icon-btn" id="nut-dong-hop-thoai" aria-label="Đóng">✕</button>
+    </div>
+    <div class="modal-body" id="than-hop-thoai"></div>
+    <div class="modal-foot" id="chan-hop-thoai"></div>
+  </div>
+</div>
+
+<!-- Khung xem trước -->
+<div class="preview-root" id="goc-xem-truoc" hidden>
+  <div class="preview-bar">
+    <span id="xem-truoc-ten"></span>
+    <span class="grow"></span>
+    <a class="btn btn-ghost" id="xem-truoc-tai" download>Tải xuống</a>
+    <button class="icon-btn" id="nut-dong-xem-truoc" aria-label="Đóng">✕</button>
+  </div>
+  <div class="preview-body" id="than-xem-truoc"></div>
+</div>
+
+<!-- Menu ngữ cảnh -->
+<div class="context-menu" id="menu-ngu-canh" hidden></div>
+
+<input type="file" id="chon-tep" multiple hidden>
+
+<script src="app.js"></script>
+</body>
+</html>
