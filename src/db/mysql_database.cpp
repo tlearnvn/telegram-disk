@@ -265,7 +265,7 @@ bool MysqlDatabase::listEntries(const ListOptions& opts, std::vector<FileEntry>&
     if (opts.onlyStarred) sql += " AND starred=1";
     if (opts.search.empty() && !opts.onlyTrashed && !opts.onlyStarred)
         sql += " AND parent_id=" + N(opts.parentId);
-    if (!opts.search.empty()) sql += " AND LOWER(name) LIKE " + Q("%" + toLower(opts.search) + "%");
+    if (!opts.search.empty()) sql += " AND LOWER(name) LIKE " + Q("%" + toLowerUtf8(opts.search) + "%");
     if (opts.ownerId > 0) sql += " AND owner_id=" + N(static_cast<int64_t>(opts.ownerId));
     sql += orderByClause(opts.sortBy, opts.descending);
     sql += " LIMIT " + N(static_cast<int64_t>(opts.limit > 0 ? opts.limit : 500)) + " OFFSET " +
@@ -288,7 +288,7 @@ bool MysqlDatabase::countEntries(const ListOptions& opts, uint64_t& out, std::st
     if (opts.onlyStarred) sql += " AND starred=1";
     if (opts.search.empty() && !opts.onlyTrashed && !opts.onlyStarred)
         sql += " AND parent_id=" + N(opts.parentId);
-    if (!opts.search.empty()) sql += " AND LOWER(name) LIKE " + Q("%" + toLower(opts.search) + "%");
+    if (!opts.search.empty()) sql += " AND LOWER(name) LIKE " + Q("%" + toLowerUtf8(opts.search) + "%");
     if (opts.ownerId > 0) sql += " AND owner_id=" + N(static_cast<int64_t>(opts.ownerId));
     MysqlResult r = run(sql, error);
     if (!r.ok) return false;
@@ -367,7 +367,7 @@ bool MysqlDatabase::listChildrenRecursive(int64_t folderId, std::vector<FileEntr
 bool MysqlDatabase::updatePathsUnder(const std::string& oldPrefix, const std::string& newPrefix,
                                      std::string& error) {
     std::string sql = "UPDATE ttd_entries SET path = CONCAT(" + Q(newPrefix) + ", SUBSTRING(path, " +
-                      N(static_cast<int64_t>(oldPrefix.size() + 1)) + ")) WHERE path=" +
+                      N(static_cast<int64_t>(utf8Length(oldPrefix) + 1)) + ")) WHERE path=" +
                       Q(oldPrefix) + " OR path LIKE " + Q(oldPrefix + "/%");
     return run(sql, error).ok;
 }
@@ -773,6 +773,15 @@ bool MysqlDatabase::stats(StorageStats& out, std::string& error) {
     }
     MysqlResult r4 = run("SELECT COUNT(*) FROM ttd_chunks", error);
     if (r4.ok && !r4.rows.empty()) out.chunkCount = toUInt(r4.rows[0].at(0));
+    // Dung lượng thật: gộp theo document_id để mảnh dùng chung (tệp trùng nội
+    // dung) chỉ được tính một lần. MySQL bắt buộc đặt bí danh cho bảng dẫn xuất.
+    MysqlResult r5 = run("SELECT COALESCE(SUM(size),0), COUNT(*) FROM (SELECT document_id, "
+                         "MAX(size) AS size FROM ttd_chunks GROUP BY document_id) AS m",
+                         error);
+    if (r5.ok && !r5.rows.empty()) {
+        out.physicalBytes = toUInt(r5.rows[0].at(0));
+        out.uniqueChunkCount = toUInt(r5.rows[0].at(1));
+    }
     return true;
 }
 

@@ -900,6 +900,14 @@ void registerApiRoutes(HttpServer& server, app::App& app) {
         storageJson.set("file_count", s.fileCount);
         storageJson.set("folder_count", s.folderCount);
         storageJson.set("chunk_count", s.chunkCount);
+        // Dung lượng thật chiếm trên Telegram, sau khi trừ phần dùng chung của
+        // các tệp trùng nội dung.
+        storageJson.set("physical_bytes", s.physicalBytes);
+        storageJson.set("physical_text", formatBytes(s.physicalBytes));
+        storageJson.set("unique_chunk_count", s.uniqueChunkCount);
+        uint64_t saved = s.totalBytes > s.physicalBytes ? s.totalBytes - s.physicalBytes : 0;
+        storageJson.set("saved_bytes", saved);
+        storageJson.set("saved_text", formatBytes(saved));
         storageJson.set("trashed_bytes", s.trashedBytes);
         storageJson.set("trashed_text", formatBytes(s.trashedBytes));
         storageJson.set("trashed_count", s.trashedCount);

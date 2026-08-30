@@ -43,6 +43,83 @@ std::string toUpper(const std::string& s) {
     return r;
 }
 
+namespace {
+
+// Đọc một điểm mã UTF-8; trả về số byte đã dùng (0 nếu chuỗi hỏng).
+size_t decodeUtf8(const std::string& s, size_t i, uint32_t& cp) {
+    unsigned char c = static_cast<unsigned char>(s[i]);
+    size_t extra;
+    if (c < 0x80) { cp = c; return 1; }
+    else if ((c & 0xE0) == 0xC0) { extra = 1; cp = c & 0x1F; }
+    else if ((c & 0xF0) == 0xE0) { extra = 2; cp = c & 0x0F; }
+    else if ((c & 0xF8) == 0xF0) { extra = 3; cp = c & 0x07; }
+    else return 0;
+    if (i + extra >= s.size()) return 0;
+    for (size_t k = 1; k <= extra; ++k) {
+        unsigned char cc = static_cast<unsigned char>(s[i + k]);
+        if ((cc & 0xC0) != 0x80) return 0;
+        cp = (cp << 6) | (cc & 0x3F);
+    }
+    return extra + 1;
+}
+
+void encodeUtf8(uint32_t cp, std::string& out) {
+    if (cp < 0x80) {
+        out.push_back(static_cast<char>(cp));
+    } else if (cp < 0x800) {
+        out.push_back(static_cast<char>(0xC0 | (cp >> 6)));
+        out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
+    } else if (cp < 0x10000) {
+        out.push_back(static_cast<char>(0xE0 | (cp >> 12)));
+        out.push_back(static_cast<char>(0x80 | ((cp >> 6) & 0x3F)));
+        out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
+    } else {
+        out.push_back(static_cast<char>(0xF0 | (cp >> 18)));
+        out.push_back(static_cast<char>(0x80 | ((cp >> 12) & 0x3F)));
+        out.push_back(static_cast<char>(0x80 | ((cp >> 6) & 0x3F)));
+        out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
+    }
+}
+
+uint32_t lowerCodepoint(uint32_t cp) {
+    // ASCII
+    if (cp >= 'A' && cp <= 'Z') return cp + 32;
+    // Latin-1 bổ sung: À–Þ (bỏ ×) — gồm Á Â Ã È É Ê Ì Í Ò Ó Ô Õ Ù Ú Ý của tiếng Việt.
+    if (cp >= 0x00C0 && cp <= 0x00DE && cp != 0x00D7) return cp + 32;
+    // Latin mở rộng A: cặp chẵn/lẻ — gồm Ă (0102) và Đ (0110).
+    if (cp >= 0x0100 && cp <= 0x017F) return (cp % 2 == 0) ? cp + 1 : cp;
+    // Latin mở rộng B: Ơ (01A0) và Ư (01AF) của tiếng Việt.
+    if (cp == 0x01A0 || cp == 0x01AF) return cp + 1;
+    // Latin mở rộng bổ sung: toàn bộ chữ có dấu nặng/hỏi/ngã tiếng Việt.
+    if (cp >= 0x1E00 && cp <= 0x1EFF) return (cp % 2 == 0) ? cp + 1 : cp;
+    // Hy Lạp và Kirin cơ bản (phòng khi tên tệp dùng ngôn ngữ khác).
+    if (cp >= 0x0391 && cp <= 0x03A9 && cp != 0x03A2) return cp + 32;
+    if (cp >= 0x0410 && cp <= 0x042F) return cp + 32;
+    if (cp >= 0x0400 && cp <= 0x040F) return cp + 80;
+    return cp;
+}
+
+}  // namespace
+
+std::string toLowerUtf8(const std::string& s) {
+    std::string out;
+    out.reserve(s.size());
+    size_t i = 0;
+    while (i < s.size()) {
+        uint32_t cp = 0;
+        size_t n = decodeUtf8(s, i, cp);
+        if (n == 0) {
+            // Byte hỏng: giữ nguyên để không làm mất dữ liệu.
+            out.push_back(s[i]);
+            ++i;
+            continue;
+        }
+        encodeUtf8(lowerCodepoint(cp), out);
+        i += n;
+    }
+    return out;
+}
+
 bool startsWith(const std::string& s, const std::string& prefix) {
     return s.size() >= prefix.size() && std::memcmp(s.data(), prefix.data(), prefix.size()) == 0;
 }

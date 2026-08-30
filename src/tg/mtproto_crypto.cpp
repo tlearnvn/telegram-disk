@@ -263,23 +263,44 @@ uint64_t gcd64(uint64_t a, uint64_t b) {
 }  // namespace
 
 bool factorizePq(uint64_t pq, uint64_t& p, uint64_t& q) {
-    if (pq == 0) return false;
-    if ((pq & 1) == 0) {
-        p = 2;
-        q = pq / 2;
-        if (p > q) std::swap(p, q);
-        return true;
+    if (pq < 4) return false;
+
+    // Bước 1: chia thử các thừa số nhỏ — rất nhanh và bắt được phần lớn trường hợp dễ.
+    constexpr uint64_t kTrialLimit = 65536;
+    for (uint64_t d = 2; d <= kTrialLimit && d * d <= pq; d += (d == 2 ? 1 : 2)) {
+        if (pq % d == 0) {
+            p = d;
+            q = pq / d;
+            if (p > q) std::swap(p, q);
+            return true;
+        }
     }
-    // Thuật toán Pollard-Brent — pq của Telegram chỉ khoảng 63 bit nên rất nhanh.
-    for (int attempt = 0; attempt < 40; ++attempt) {
+
+    // Bước 2: Pollard-Brent. pq của Telegram là tích hai số nguyên tố dưới 2^32
+    // nên thuật toán chỉ cần khoảng 2^16 bước; ta cấp ngân sách rộng rãi hơn nhiều
+    // rồi đổi tham số ngẫu nhiên, thay vì để một lần chạy xấu treo vô hạn.
+    constexpr uint64_t kMaxR = 1ULL << 20;          // độ dài chu kỳ tối đa mỗi lần thử
+    constexpr uint64_t kStepBudget = 1ULL << 23;    // số bước tối đa mỗi lần thử
+    constexpr int kMaxAttempts = 64;
+
+    for (int attempt = 0; attempt < kMaxAttempts; ++attempt) {
         uint64_t c = 1 + crypto::randomBelow(pq - 1);
         uint64_t x = crypto::randomBelow(pq);
         uint64_t y = x, d = 1, ys = y;
-        uint64_t r = 1, m = 128;
+        uint64_t r = 1;
+        const uint64_t m = 128;
         uint64_t qAcc = 1;
-        while (d == 1) {
+        uint64_t steps = 0;
+        bool hetNganSach = false;
+
+        while (d == 1 && r <= kMaxR && !hetNganSach) {
             x = y;
-            for (uint64_t i = 0; i < r; ++i) y = (mulMod64(y, y, pq) + c) % pq;
+            for (uint64_t i = 0; i < r; ++i) {
+                y = (mulMod64(y, y, pq) + c) % pq;
+                if (++steps > kStepBudget) { hetNganSach = true; break; }
+            }
+            if (hetNganSach) break;
+
             uint64_t k = 0;
             while (k < r && d == 1) {
                 ys = y;
@@ -289,21 +310,27 @@ bool factorizePq(uint64_t pq, uint64_t& p, uint64_t& q) {
                     uint64_t diff = x > y ? x - y : y - x;
                     if (diff == 0) diff = 1;
                     qAcc = mulMod64(qAcc, diff, pq);
+                    if (qAcc == 0) qAcc = 1;  // tránh gcd luôn ra pq
+                    if (++steps > kStepBudget) { hetNganSach = true; break; }
                 }
                 d = gcd64(qAcc, pq);
                 k += lim;
+                if (hetNganSach) break;
             }
             r <<= 1;
-            if (r > (1ULL << 40)) break;
         }
+
         if (d == pq) {
+            // Cả nhóm cho ra pq — lần ngược từng bước để tách ra thừa số thật.
             d = 1;
-            do {
+            uint64_t back = 0;
+            while (d == 1 && back < kStepBudget) {
                 ys = (mulMod64(ys, ys, pq) + c) % pq;
                 uint64_t diff = x > ys ? x - ys : ys - x;
                 if (diff == 0) diff = 1;
                 d = gcd64(diff, pq);
-            } while (d == 1);
+                ++back;
+            }
         }
         if (d != 1 && d != pq) {
             p = d;

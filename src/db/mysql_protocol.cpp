@@ -301,7 +301,7 @@ bool MysqlConnection::handshake(const MysqlConnectionParams& params, std::string
     if (packet[0] == 0xff) {
         Reader r(packet);
         uint8_t tag;
-        uint16_t code;
+        uint16_t code = 0;
         r.u8(tag);
         r.u16(code);
         std::string msg;
@@ -422,8 +422,8 @@ bool MysqlConnection::authenticate(const MysqlConnectionParams& params, const By
 
         if (tag == 0xff) {
             Reader r(resp);
-            uint8_t t;
-            uint16_t code;
+            uint8_t t = 0;
+            uint16_t code = 0;
             r.u8(t);
             r.u16(code);
             std::string state;
@@ -440,7 +440,7 @@ bool MysqlConnection::authenticate(const MysqlConnectionParams& params, const By
         if (tag == 0xfe) {
             // Đổi phương thức xác thực.
             Reader r(resp);
-            uint8_t t;
+            uint8_t t = 0;
             r.u8(t);
             std::string newPlugin;
             if (!r.nulString(newPlugin)) {
@@ -536,8 +536,8 @@ MysqlResult MysqlConnection::readQueryResponse() {
     uint8_t tag = packet[0];
     if (tag == 0xff) {
         Reader r(packet);
-        uint8_t t;
-        uint16_t code;
+        uint8_t t = 0;
+        uint16_t code = 0;
         r.u8(t);
         r.u16(code);
         std::string state;
@@ -554,7 +554,7 @@ MysqlResult MysqlConnection::readQueryResponse() {
     }
     if (tag == 0x00 || tag == 0xfe) {
         Reader r(packet);
-        uint8_t t;
+        uint8_t t = 0;
         r.u8(t);
         bool isNull = false;
         r.lenEncInt(result.affectedRows, isNull);
@@ -623,8 +623,8 @@ MysqlResult MysqlConnection::readQueryResponse() {
         if (rtag == 0xfe && packet.size() < 9) break;  // EOF / OK kết thúc
         if (rtag == 0xff) {
             Reader er(packet);
-            uint8_t t;
-            uint16_t code;
+            uint8_t t = 0;
+            uint16_t code = 0;
             er.u8(t);
             er.u16(code);
             std::string msg;

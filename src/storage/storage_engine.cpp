@@ -181,6 +181,8 @@ EngineStats StorageEngine::stats() const {
         s.chunkCount = dbStats.chunkCount;
         s.trashedBytes = dbStats.trashedBytes;
         s.trashedCount = dbStats.trashedCount;
+        s.physicalBytes = dbStats.physicalBytes;
+        s.uniqueChunkCount = dbStats.uniqueChunkCount;
     }
     s.cacheUsed = cache_.used();
     s.cacheCapacity = cache_.capacity();

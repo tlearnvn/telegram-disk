@@ -87,6 +87,24 @@ void readEntry(Stmt& st, FileEntry& e) {
     e.note = st.colText(19);
 }
 
+// Hàm SQL tuỳ biến: đổi chữ thường có hiểu dấu tiếng Việt.
+// SQLite dựng sẵn chỉ đổi được chữ ASCII nên tìm "BÁO CÁO" sẽ không ra "Báo cáo".
+void sqlLowerUtf8(sqlite3_context* ctx, int argc, sqlite3_value** argv) {
+    if (argc < 1) {
+        sqlite3_result_null(ctx);
+        return;
+    }
+    const unsigned char* text = sqlite3_value_text(argv[0]);
+    if (!text) {
+        sqlite3_result_null(ctx);
+        return;
+    }
+    int n = sqlite3_value_bytes(argv[0]);
+    std::string out = toLowerUtf8(std::string(reinterpret_cast<const char*>(text),
+                                              static_cast<size_t>(n)));
+    sqlite3_result_text(ctx, out.c_str(), static_cast<int>(out.size()), SQLITE_TRANSIENT);
+}
+
 std::string orderByClause(const std::string& sortBy, bool desc) {
     std::string col;
     if (sortBy == "size") col = "size";
@@ -128,6 +146,13 @@ bool SqliteDatabase::open(std::string& error) {
         return false;
     }
     sqlite3_busy_timeout(db_, 10000);
+
+    // Đăng ký hàm đổi chữ thường hiểu tiếng Việt để tìm kiếm không phân biệt hoa thường.
+    if (sqlite3_create_function_v2(db_, "ttd_lower", 1, SQLITE_UTF8 | SQLITE_DETERMINISTIC,
+                                   nullptr, &sqlLowerUtf8, nullptr, nullptr,
+                                   nullptr) != SQLITE_OK) {
+        LOG_WARN(kTag, "Không đăng ký được hàm ttd_lower — tìm kiếm sẽ phân biệt dấu");
+    }
 
     std::string err;
     // WAL cho phép đọc song song trong khi ghi — quan trọng khi vừa tải lên vừa duyệt.
@@ -334,7 +359,7 @@ bool SqliteDatabase::listEntries(const ListOptions& opts, std::vector<FileEntry>
     if (opts.onlyStarred) sql += " AND starred=1";
     if (opts.search.empty() && !opts.onlyTrashed && !opts.onlyStarred)
         sql += " AND parent_id=?";
-    if (!opts.search.empty()) sql += " AND lower(name) LIKE ?";
+    if (!opts.search.empty()) sql += " AND ttd_lower(name) LIKE ?";
     if (opts.ownerId > 0) sql += " AND owner_id=?";
     sql += orderByClause(opts.sortBy, opts.descending);
     sql += " LIMIT ? OFFSET ?";
@@ -347,7 +372,7 @@ bool SqliteDatabase::listEntries(const ListOptions& opts, std::vector<FileEntry>
     int idx = 1;
     if (opts.search.empty() && !opts.onlyTrashed && !opts.onlyStarred)
         st.bindInt(idx++, opts.parentId);
-    if (!opts.search.empty()) st.bindText(idx++, "%" + toLower(opts.search) + "%");
+    if (!opts.search.empty()) st.bindText(idx++, "%" + toLowerUtf8(opts.search) + "%");
     if (opts.ownerId > 0) st.bindInt(idx++, opts.ownerId);
     st.bindInt(idx++, opts.limit > 0 ? opts.limit : 500);
     st.bindInt(idx++, opts.offset);
@@ -368,7 +393,7 @@ bool SqliteDatabase::countEntries(const ListOptions& opts, uint64_t& out, std::s
     if (opts.onlyStarred) sql += " AND starred=1";
     if (opts.search.empty() && !opts.onlyTrashed && !opts.onlyStarred)
         sql += " AND parent_id=?";
-    if (!opts.search.empty()) sql += " AND lower(name) LIKE ?";
+    if (!opts.search.empty()) sql += " AND ttd_lower(name) LIKE ?";
     if (opts.ownerId > 0) sql += " AND owner_id=?";
 
     Stmt st(db_, sql);
@@ -379,7 +404,7 @@ bool SqliteDatabase::countEntries(const ListOptions& opts, uint64_t& out, std::s
     int idx = 1;
     if (opts.search.empty() && !opts.onlyTrashed && !opts.onlyStarred)
         st.bindInt(idx++, opts.parentId);
-    if (!opts.search.empty()) st.bindText(idx++, "%" + toLower(opts.search) + "%");
+    if (!opts.search.empty()) st.bindText(idx++, "%" + toLowerUtf8(opts.search) + "%");
     if (opts.ownerId > 0) st.bindInt(idx++, opts.ownerId);
     out = st.step() ? static_cast<uint64_t>(st.colInt(0)) : 0;
     return true;
@@ -486,7 +511,8 @@ bool SqliteDatabase::updatePathsUnder(const std::string& oldPrefix, const std::s
         return false;
     }
     st.bindText(1, newPrefix);
-    st.bindInt(2, static_cast<int64_t>(oldPrefix.size() + 1));
+    // substr() của SQLite đếm theo ký tự, không phải byte.
+    st.bindInt(2, static_cast<int64_t>(utf8Length(oldPrefix) + 1));
     st.bindText(3, oldPrefix);
     st.bindText(4, oldPrefix + "/%");
     st.step();
@@ -734,7 +760,7 @@ bool SqliteDatabase::getUserByName(const std::string& username, UserEntry& out,
                                    std::string& error) {
     std::lock_guard<std::mutex> lk(mu_);
     Stmt st(db_, std::string("SELECT ") + kUserColumns +
-                     " FROM ttd_users WHERE lower(username)=lower(?) LIMIT 1");
+                     " FROM ttd_users WHERE ttd_lower(username)=ttd_lower(?) LIMIT 1");
     if (!st.ok()) {
         error = st.error();
         return false;
@@ -1181,6 +1207,17 @@ bool SqliteDatabase::stats(StorageStats& out, std::string& error) {
     {
         Stmt st(db_, "SELECT COUNT(*) FROM ttd_chunks");
         if (st.ok() && st.step()) out.chunkCount = static_cast<uint64_t>(st.colInt(0));
+    }
+    {
+        // Dung lượng thật: gộp theo document_id để mảnh dùng chung (tệp trùng
+        // nội dung) chỉ được tính một lần.
+        Stmt st(db_,
+                "SELECT COALESCE(SUM(size),0), COUNT(*) FROM (SELECT document_id, MAX(size) AS "
+                "size FROM ttd_chunks GROUP BY document_id)");
+        if (st.ok() && st.step()) {
+            out.physicalBytes = static_cast<uint64_t>(st.colInt(0));
+            out.uniqueChunkCount = static_cast<uint64_t>(st.colInt(1));
+        }
     }
     return true;
 }

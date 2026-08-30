@@ -24,6 +24,8 @@ struct EngineStats {
     uint64_t chunkCount = 0;
     uint64_t trashedBytes = 0;
     uint64_t trashedCount = 0;
+    uint64_t physicalBytes = 0;
+    uint64_t uniqueChunkCount = 0;
     uint64_t cacheUsed = 0;
     uint64_t cacheCapacity = 0;
     uint64_t cacheHits = 0;

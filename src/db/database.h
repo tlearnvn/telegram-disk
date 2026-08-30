@@ -125,12 +125,19 @@ struct ListOptions {
 };
 
 struct StorageStats {
+    // Tổng kích thước "trên giấy tờ" — cộng dồn kích thước từng tệp.
     uint64_t totalBytes = 0;
     uint64_t fileCount = 0;
     uint64_t folderCount = 0;
+    // Số dòng mảnh (một mảnh dùng chung bị đếm nhiều lần).
     uint64_t chunkCount = 0;
     uint64_t trashedBytes = 0;
     uint64_t trashedCount = 0;
+    // Dung lượng thật đang chiếm trên Telegram: mỗi document_id chỉ tính một
+    // lần, vì các tệp trùng nội dung dùng chung đúng mảnh đó. Tính cả mảnh của
+    // tệp trong thùng rác — chúng vẫn nằm trên Telegram cho tới khi xoá hẳn.
+    uint64_t physicalBytes = 0;
+    uint64_t uniqueChunkCount = 0;
 };
 
 // ---------------------------------------------------------------------------

@@ -11,8 +11,12 @@ using Bytes = std::vector<uint8_t>;
 
 // ---- chuỗi cơ bản ---------------------------------------------------------
 std::string trim(const std::string& s);
+// Chỉ đổi chữ cái ASCII (nhanh, dùng cho tên tiêu đề, khoá cấu hình…).
 std::string toLower(const std::string& s);
 std::string toUpper(const std::string& s);
+// Đổi chữ thường có hiểu UTF-8, bao phủ đầy đủ chữ có dấu tiếng Việt
+// (À Ă Â Đ Ê Ô Ơ Ư và toàn bộ dải U+1EA0–U+1EF9). Dùng cho tìm kiếm tên tệp.
+std::string toLowerUtf8(const std::string& s);
 bool startsWith(const std::string& s, const std::string& prefix);
 bool endsWith(const std::string& s, const std::string& suffix);
 bool iequals(const std::string& a, const std::string& b);

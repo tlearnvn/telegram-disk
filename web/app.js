@@ -1279,6 +1279,8 @@ async function capNhatThongKeNhanh() {
     const s = await api('/api/stats');
     S.thongKe = s;
     $('#dl-tong').textContent = s.storage.total_text;
+    $('#dl-tong').title = `Chiếm thật trên Telegram: ${s.storage.physical_text}` +
+      (s.storage.saved_bytes ? ` (tiết kiệm ${s.storage.saved_text} nhờ khử trùng lặp)` : '');
     $('#dl-so-tep').textContent = `${s.storage.file_count} tệp · ${s.storage.folder_count} thư mục`;
     $('#dl-nguon').textContent = s.backend.name +
       (s.backend.total_accounts ? ` · ${s.backend.ready_accounts}/${s.backend.total_accounts} tk`
@@ -1307,8 +1309,13 @@ async function napThongKe() {
     g.innerHTML = '';
     g.appendChild(theThongKe('Tổng dung lượng đã dùng', s.storage.total_text,
       `${s.storage.file_count} tệp trong ${s.storage.folder_count} thư mục`, 'image', '💾'));
-    g.appendChild(theThongKe('Số mảnh trên Telegram', String(s.storage.chunk_count),
-      `Cỡ mảnh hiện tại: ${s.storage.chunk_size_text}`, 'video', '🧩'));
+    g.appendChild(theThongKe('Chiếm thật trên Telegram', s.storage.physical_text,
+      s.storage.saved_bytes
+        ? `Tiết kiệm ${s.storage.saved_text} nhờ khử trùng lặp`
+        : 'Không có tệp nào trùng nội dung', 'video', '☁️'));
+    g.appendChild(theThongKe('Số mảnh trên Telegram', String(s.storage.unique_chunk_count),
+      `${s.storage.chunk_count} lượt tham chiếu · cỡ mảnh ${s.storage.chunk_size_text}`,
+      'video', '🧩'));
     g.appendChild(theThongKe('Đã đẩy lên', s.storage.uploaded_text,
       'Tính từ lúc khởi động', 'code', '⬆️'));
     g.appendChild(theThongKe('Đã tải về', s.storage.downloaded_text,
