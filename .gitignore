@@ -1,0 +1,36 @@
+# Thư mục build
+build/
+build-*/
+dist/
+out/
+
+# Dữ liệu chạy thử
+data/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+logs/
+*.log
+config.json
+config.local.json
+spool/
+cache/
+
+# Tệp tạm của trình biên dịch / IDE
+*.o
+*.obj
+*.a
+*.so
+*.dll
+*.exe
+*.pdb
+*.ilk
+.vscode/
+.idea/
+compile_commands.json
+.cache/
+
+# Hệ điều hành
+.DS_Store
+Thumbs.db
