@@ -63,6 +63,11 @@ public:
     int32_t appApiId() const { return appInfo_.apiId; }
     const std::string& appApiHash() const { return appInfo_.apiHash; }
 
+    // Đổi nóng thông tin ứng dụng (api_id, api_hash, tên thiết bị…) khi quản
+    // trị viên lưu lại Cài đặt. Khoá xác thực đang có được giữ lại, còn các
+    // phiên bị đóng để lần gọi sau dựng lại và gửi initConnection mới.
+    void updateAppInfo(const AppInfo& info);
+
     // Nạp khoá xác thực đã lưu (chuỗi hex 256 byte + salt + dc).
     void loadSession(int dcId, const Bytes& authKey, int64_t serverSalt);
     // Lấy toàn bộ khoá đang giữ để lưu vào cơ sở dữ liệu.

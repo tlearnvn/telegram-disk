@@ -27,6 +27,8 @@
 #include "storage/download_stream.h"
 #include "tg/mtproto_crypto.h"
 #include "tg/tl_codec.h"
+#include "tg/account_pool.h"
+#include "tg/tg_account.h"
 #include "tg/tl_schema.h"
 #include "version.h"
 
@@ -728,6 +730,93 @@ void testCauHinh() {
 }
 
 // ---------------------------------------------------------------------------
+// initConnection là chỗ Telegram đọc api_id. Sai một byte ở đây là nhận ngay
+// CONNECTION_API_ID_INVALID, nên kiểm tận byte trên dây.
+void testInitConnection() {
+    nhom("initConnection / api_id");
+    using namespace tg;
+
+    TlSchema schema;
+    std::string mtproto, apiSchema;
+    if (assets::find("schema/mtproto.tl", mtproto)) schema.load(mtproto, nullptr);
+    if (assets::find("schema/api.tl", apiSchema)) schema.load(apiSchema, nullptr);
+
+    const TlConstructor* ctor = schema.byName("initConnection");
+    kiem(ctor != nullptr, "schema có initConnection");
+    if (!ctor) return;
+    kiem(ctor->args.size() >= 2 && ctor->args[0].isFlagsInt,
+         "trường đầu tiên của initConnection là flags:#");
+    kiem(ctor->args.size() >= 2 && ctor->args[1].name == "api_id",
+         "api_id nằm ngay sau flags");
+
+    TlCodec codec(schema);
+    const int32_t kApiId = 25008104;
+    TlValue init = TlValue::makeObject("initConnection");
+    init.setInt("api_id", kApiId);
+    init.setBytes("device_model", std::string("PC"));
+    init.setBytes("system_version", std::string("Windows 10"));
+    init.setBytes("app_version", std::string("1.0.0"));
+    init.setBytes("system_lang_code", std::string("vi"));
+    init.setBytes("lang_pack", std::string());
+    init.setBytes("lang_code", std::string("vi"));
+    init.set("query", TlValue::makeObject("help.getConfig"));
+
+    TlWriter w;
+    std::string loi;
+    kiem(codec.serialize(init, w, loi), "tuần tự hoá initConnection", loi);
+
+    // Trên dây: [ctor:4][flags:4][api_id:4]…
+    const Bytes& b = w.buffer();
+    kiem(b.size() > 12, "gói initConnection đủ dài");
+    if (b.size() > 12) {
+        auto doc32 = [&](size_t o) {
+            return static_cast<uint32_t>(b[o]) | (static_cast<uint32_t>(b[o + 1]) << 8) |
+                   (static_cast<uint32_t>(b[o + 2]) << 16) |
+                   (static_cast<uint32_t>(b[o + 3]) << 24);
+        };
+        kiem(doc32(0) == ctor->id, "4 byte đầu là định danh hàm dựng");
+        kiem(doc32(4) == 0, "flags = 0 vì không có proxy/params");
+        kiem(static_cast<int32_t>(doc32(8)) == kApiId,
+             "api_id nằm đúng byte thứ 8 và đúng giá trị");
+    }
+
+    // Giải mã ngược lại phải ra đúng api_id.
+    TlReader r(w.buffer());
+    TlValue lai;
+    kiem(codec.deserialize(r, lai, loi), "giải mã lại initConnection", loi);
+    kiem(lai["api_id"].asInt() == kApiId, "api_id đọc lại khớp");
+
+    // Lỗi thật gặp phải: api_id điền sau khi ứng dụng đã chạy thì pool vẫn giữ
+    // bản cũ (0) và mọi tài khoản gửi api_id sai.
+    AppInfo cu;
+    cu.apiId = 0;
+    cu.layer = schema.layer();
+    AccountPool pool(schema, cu);
+    TgAccountConfig ac;
+    ac.id = 1;
+    ac.label = "Tuan";
+    ac.homeDc = 2;
+    TgAccount* acc = pool.addAccount(ac);
+    kiem(acc != nullptr && acc->appApiId() == 0, "tài khoản ban đầu mang api_id 0");
+
+    AppInfo moi = cu;
+    moi.apiId = kApiId;
+    moi.apiHash = "0123456789abcdef0123456789abcdef";
+    pool.updateAppInfo(moi);
+    kiem(pool.appInfo().apiId == kApiId, "pool nhận api_id mới");
+    kiem(acc != nullptr && acc->appApiId() == kApiId,
+         "tài khoản đang có được cập nhật api_id");
+
+    TgAccountConfig ac2;
+    ac2.id = 2;
+    ac2.label = "Tuan 2";
+    ac2.homeDc = 2;
+    TgAccount* acc2 = pool.addAccount(ac2);
+    kiem(acc2 != nullptr && acc2->appApiId() == kApiId,
+         "tài khoản thêm sau cũng mang api_id mới");
+}
+
+// ---------------------------------------------------------------------------
 void testPhienBan() {
     nhom("Phiên bản");
     kiem(std::strlen(version::kVersion) >= 5, "chuỗi phiên bản có nội dung");
@@ -761,6 +850,7 @@ int main() {
     testMysqlThoat();
     testCoSoDuLieu();
     testCauHinh();
+    testInitConnection();
     testPhienBan();
 
     std::printf("\n");

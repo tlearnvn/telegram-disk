@@ -44,6 +44,10 @@ public:
 
     void setSupergroup(const SupergroupRef& group);
     SupergroupRef supergroup() const;
+
+    // Đổi nóng thông tin ứng dụng cho pool và mọi tài khoản đang có.
+    void updateAppInfo(const AppInfo& info);
+    AppInfo appInfo() const;
     void setSessionPersist(SessionPersistFn fn) { persistFn_ = std::move(fn); }
 
     // Thêm tài khoản. Trả về con trỏ (thuộc sở hữu của pool).

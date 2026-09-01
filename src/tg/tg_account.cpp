@@ -45,6 +45,18 @@ void TgAccount::loadSession(int dcId, const Bytes& authKey, int64_t serverSalt) 
     loadedKeys_[dcId] = k;
 }
 
+void TgAccount::updateAppInfo(const AppInfo& info) {
+    std::lock_guard<std::mutex> lk(mu_);
+    appInfo_ = info;
+    // Giữ lại khoá xác thực đã tạo — khoá gắn với trung tâm dữ liệu chứ không
+    // gắn với api_id, nên không phải bắt tay lại từ đầu.
+    for (auto& kv : sessions_) {
+        AuthKey k = kv.second->authKey();
+        if (k.valid()) loadedKeys_[kv.first] = k;
+    }
+    sessions_.clear();
+}
+
 std::map<int, AuthKey> TgAccount::exportSessions() const {
     std::lock_guard<std::mutex> lk(mu_);
     std::map<int, AuthKey> out = loadedKeys_;

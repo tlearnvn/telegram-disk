@@ -39,6 +39,10 @@ std::string friendlyError(const RpcError& err) {
     if (m == "PHONE_CODE_EMPTY") return "Chưa nhập mã xác thực.";
     if (m == "PASSWORD_HASH_INVALID") return "Mật khẩu hai lớp không đúng.";
     if (m == "API_ID_INVALID") return "api_id hoặc api_hash không hợp lệ.";
+    if (m == "CONNECTION_API_ID_INVALID")
+        return "api_id gửi lên Telegram không hợp lệ. Hãy kiểm tra lại api_id trong Cài đặt → "
+               "Telegram (phải là dãy số lấy ở my.telegram.org), lưu lại rồi thử thêm tài "
+               "khoản lần nữa.";
     if (m == "API_ID_PUBLISHED_FLOOD")
         return "api_id này bị Telegram hạn chế do dùng quá phổ biến. Hãy tạo api_id riêng tại "
                "my.telegram.org.";

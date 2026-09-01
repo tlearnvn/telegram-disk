@@ -90,6 +90,19 @@ SupergroupRef AccountPool::supergroup() const {
     return group_;
 }
 
+void AccountPool::updateAppInfo(const AppInfo& info) {
+    std::lock_guard<std::mutex> lk(mu_);
+    appInfo_ = info;
+    for (auto& a : accounts_) a->updateAppInfo(info);
+    LOG_INFO(kTag, "Đã cập nhật thông tin ứng dụng cho %zu tài khoản (api_id %d)",
+             accounts_.size(), info.apiId);
+}
+
+AppInfo AccountPool::appInfo() const {
+    std::lock_guard<std::mutex> lk(mu_);
+    return appInfo_;
+}
+
 TgAccount* AccountPool::addAccount(const TgAccountConfig& config) {
     std::lock_guard<std::mutex> lk(mu_);
     for (auto& a : accounts_)

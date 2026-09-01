@@ -18,7 +18,22 @@ namespace app {
 
 namespace {
 constexpr const char* kTag = "app";
+
+// Thông tin ứng dụng gửi kèm trong initConnection. Dựng ở một chỗ duy nhất để
+// lúc khởi động và lúc lưu Cài đặt không bao giờ lệch nhau.
+tg::AppInfo buildAppInfo(const Config& cfg) {
+    tg::AppInfo info;
+    info.apiId = cfg.telegram.apiId;
+    info.apiHash = cfg.telegram.apiHash;
+    info.deviceModel = cfg.telegram.deviceModel;
+    info.systemVersion = cfg.telegram.systemVersion;
+    info.appVersion = std::string(version::kVersion);
+    info.langCode = cfg.telegram.langCode;
+    info.systemLangCode = cfg.telegram.langCode;
+    info.layer = cfg.telegram.layer;
+    return info;
 }
+}  // namespace
 
 App::App() = default;
 
@@ -150,15 +165,12 @@ bool App::initBackend(std::string& error) {
                  "Đang chạy ở CHẾ ĐỘ THỬ NGHIỆM — dữ liệu lưu trên đĩa máy này, "
                  "không đẩy lên Telegram.");
     } else {
-        tg::AppInfo info;
-        info.apiId = cfg.telegram.apiId;
-        info.apiHash = cfg.telegram.apiHash;
-        info.deviceModel = cfg.telegram.deviceModel;
-        info.systemVersion = cfg.telegram.systemVersion;
-        info.appVersion = std::string(version::kVersion);
-        info.langCode = cfg.telegram.langCode;
-        info.systemLangCode = cfg.telegram.langCode;
-        info.layer = cfg.telegram.layer;
+        tg::AppInfo info = buildAppInfo(cfg);
+        if (info.apiId == 0 || info.apiHash.empty()) {
+            LOG_WARN(kTag,
+                     "Chưa có api_id/api_hash — hãy vào Cài đặt điền trước khi thêm tài "
+                     "khoản Telegram (lấy tại my.telegram.org).");
+        }
 
         pool_.reset(new tg::AccountPool(schema_, info));
         pool_->setSessionPersist([this](int accountId, const std::map<int, tg::AuthKey>& keys) {
@@ -398,6 +410,15 @@ bool App::addAccountAndSendCode(const std::string& label, const std::string& pho
             "vào phần Cài đặt → Telegram.";
         return false;
     }
+    // Đồng bộ lại lần nữa cho chắc: tài khoản mới phải mang đúng api_id đang
+    // có trong cấu hình, kể cả khi cấu hình vừa đổi qua một đường khác.
+    {
+        tg::AppInfo info = buildAppInfo(cfg);
+        if (info.apiId != pool_->appInfo().apiId ||
+            info.apiHash != pool_->appInfo().apiHash) {
+            pool_->updateAppInfo(info);
+        }
+    }
 
     db::AccountEntry entry;
     entry.label = label.empty() ? phone : label;
@@ -417,6 +438,13 @@ bool App::addAccountAndSendCode(const std::string& label, const std::string& pho
     ac.obfuscated = cfg.telegram.obfuscated;
     ac.requestTimeoutMs = cfg.telegram.requestTimeoutSeconds * 1000;
     tg::TgAccount* account = pool_->addAccount(ac);
+    // In ra api_id đang thực sự dùng để dễ đối chiếu với my.telegram.org khi
+    // Telegram từ chối. api_hash là bí mật nên chỉ ghi độ dài.
+    if (account) {
+        LOG_INFO(kTag, "[%s] Đăng nhập với api_id %d (api_hash %zu ký tự), layer %d",
+                 ac.label.c_str(), account->appApiId(), account->appApiHash().size(),
+                 cfg.telegram.layer);
+    }
     if (!account) {
         error = "Không tạo được đối tượng tài khoản";
         return false;
@@ -616,6 +644,20 @@ bool App::applySettings(const Json& settings, std::string& error) {
     if (engine_) engine_->cache().setCapacity(cfg.storage.downloadCacheBytes);
     ensureDirectoryExists(cfg.resolvePath(cfg.storage.spoolDirectory));
     ensureDirectoryExists(cfg.resolvePath(cfg.storage.downloadCacheDirectory));
+
+    // api_id / api_hash thường được điền sau khi ứng dụng đã chạy. Nếu không
+    // đẩy xuống pool ở đây thì mọi tài khoản vẫn gửi api_id cũ (thường là 0)
+    // trong initConnection và Telegram trả về CONNECTION_API_ID_INVALID.
+    if (pool_) {
+        tg::AppInfo info = buildAppInfo(cfg);
+        tg::AppInfo current = pool_->appInfo();
+        if (info.apiId != current.apiId || info.apiHash != current.apiHash ||
+            info.deviceModel != current.deviceModel ||
+            info.systemVersion != current.systemVersion || info.langCode != current.langCode ||
+            info.systemLangCode != current.systemLangCode || info.layer != current.layer) {
+            pool_->updateAppInfo(info);
+        }
+    }
     LOG_INFO(kTag, "Đã áp dụng cấu hình mới (mảnh %s, đệm %s, nhật ký %s)",
              formatBytes(cfg.storage.chunkSize).c_str(), cfg.storage.bufferMode.c_str(),
              cfg.logging.level.c_str());
