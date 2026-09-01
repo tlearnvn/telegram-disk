@@ -1047,6 +1047,7 @@ async function taiMotTep(file, chinhSach = 'ask') {
     theoDoi.trangThai = 'Hoàn tất';
     theoDoi.lop = 'done';
     theoDoi.daGui = theoDoi.tong;
+    henGoThe(theoDoi);
     veDanhSachTaiLen();
     thongBao('Đã tải lên', `${file.name} · ${dungLuong(file.size)}`, 'ok', 4);
     if (xong && xong.entry && S.view === 'tep') napDanhSach();
@@ -1054,7 +1055,9 @@ async function taiMotTep(file, chinhSach = 'ask') {
     if (theoDoi.huy) {
       theoDoi.trangThai = 'Đã huỷ';
       theoDoi.lop = 'cancel';
+      henGoThe(theoDoi);
     } else {
+      // Thẻ lỗi ở lại để người dùng đọc được lý do; tự đóng bằng nút ×.
       theoDoi.trangThai = 'Lỗi: ' + err.message;
       theoDoi.lop = 'err';
       thongBao('Tải lên thất bại', `${file.name}: ${err.message}`, 'err', 8);
@@ -1113,6 +1116,18 @@ function hopThoaiTrungLap(file, duplicates) {
   });
 }
 
+// Giữ thẻ đã xong lại vài giây cho người dùng kịp thấy rồi tự gỡ. Thẻ lỗi thì
+// ở lại tới khi người dùng tự đóng, vì đó là thông tin cần đọc.
+const GIU_THE_XONG_MS = 6000;
+
+function henGoThe(theoDoi, cho = GIU_THE_XONG_MS) {
+  if (theoDoi.hengio) clearTimeout(theoDoi.hengio);
+  theoDoi.hengio = setTimeout(() => {
+    S.phienTaiLen.delete(theoDoi.id);
+    veDanhSachTaiLen();
+  }, cho);
+}
+
 function veDanhSachTaiLen() {
   const box = $('#danh-sach-tai-len');
   const list = Array.from(S.phienTaiLen.values());
@@ -1132,8 +1147,16 @@ function veDanhSachTaiLen() {
         el('span', {}, BIEU_TUONG.other),
         el('span', { class: 'upload-name', text: t.ten, title: t.ten }),
         el('span', { class: 'upload-state ' + (t.lop || ''), text: t.trangThai }),
-        !t.lop ? el('button', { class: 'btn btn-ghost danger',
-          onclick: () => huyTaiLen(t.id) }, 'Huỷ') : null),
+        !t.lop
+          ? el('button', { class: 'btn btn-ghost danger', onclick: () => huyTaiLen(t.id) }, 'Huỷ')
+          : el('button', {
+              class: 'btn btn-ghost', title: 'Bỏ khỏi danh sách',
+              onclick: () => {
+                if (t.hengio) clearTimeout(t.hengio);
+                S.phienTaiLen.delete(t.id);
+                veDanhSachTaiLen();
+              },
+            }, '×')),
       el('div', { class: 'progress ' + (t.lop || '') },
         el('i', { style: `width:${pct}%` })),
       el('div', { class: 'upload-meta' },
@@ -1146,6 +1169,11 @@ function veDanhSachTaiLen() {
   const badge = $('#badge-tai-len');
   badge.hidden = dangChay === 0;
   badge.textContent = String(dangChay);
+
+  // Không còn phiên nào chạy thì nút chỉ dọn danh sách, nhãn phải nói đúng vậy.
+  const nut = $('#nut-huy-tat-ca');
+  nut.textContent = dangChay ? 'Huỷ tất cả' : 'Xoá danh sách';
+  nut.hidden = list.length === 0;
 }
 
 async function huyTaiLen(id) {
@@ -1164,12 +1192,14 @@ async function huyTaiLen(id) {
     t.trangThai = 'Đã huỷ';
     t.lop = 'cancel';
   }
+  henGoThe(t);
   veDanhSachTaiLen();
 }
 
 $('#nut-huy-tat-ca').addEventListener('click', async () => {
   const dangChay = Array.from(S.phienTaiLen.values()).filter((t) => !t.lop);
   if (!dangChay.length) {
+    for (const t of S.phienTaiLen.values()) if (t.hengio) clearTimeout(t.hengio);
     S.phienTaiLen.clear();
     veDanhSachTaiLen();
     return;
@@ -1186,14 +1216,38 @@ async function dongBoTaiLen() {
   if (!S.nguoiDung) return;
   try {
     const kq = await api('/api/uploads');
+    const conSong = new Set();
     for (const u of kq.uploads || []) {
-      if (S.phienTaiLen.has(u.id)) continue;
+      conSong.add(u.id);
+      const cu = S.phienTaiLen.get(u.id);
+      if (cu) {
+        // Phiên của chính tab này do vòng tải lên tự cập nhật — không đụng vào,
+        // tránh giẫm lên nhau.
+        if (!cu.ngoai) continue;
+        cu.ten = u.name;
+        cu.tong = u.total;
+        cu.daGui = u.received;
+        cu.trangThai = u.state_text;
+        cu.taiKhoan = u.account;
+        cu.mangHienTai = u.chunk_index + 1;
+        cu.tongMang = u.chunk_total;
+        continue;
+      }
       S.phienTaiLen.set(u.id, {
         id: u.id, ten: u.name, tong: u.total, daGui: u.received,
         trangThai: u.state_text, lop: '', batDau: Date.now() - 1000,
         taiKhoan: u.account, mangHienTai: u.chunk_index + 1, tongMang: u.chunk_total,
         ngoai: true,
       });
+    }
+    // Phiên bên ngoài đã biến mất khỏi máy chủ nghĩa là nó xong (hoặc bị huỷ).
+    // Không dọn thì thẻ đứng im mãi và huy hiệu sáng hoài.
+    for (const t of Array.from(S.phienTaiLen.values())) {
+      if (!t.ngoai || t.lop || conSong.has(t.id)) continue;
+      t.lop = 'done';
+      t.trangThai = 'Hoàn tất';
+      t.daGui = t.tong;
+      henGoThe(t);
     }
     if (S.view === 'tai-len') veDanhSachTaiLen();
     const dangChay = Array.from(S.phienTaiLen.values()).filter((t) => !t.lop).length;
