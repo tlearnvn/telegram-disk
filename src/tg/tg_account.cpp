@@ -1,5 +1,7 @@
 #include "tg/tg_account.h"
 
+#include <set>
+
 #include <algorithm>
 #include <cstring>
 #include <thread>
@@ -392,30 +394,100 @@ bool TgAccount::resolveSupergroupById(int64_t channelId, int64_t accessHashHint,
 }
 
 bool TgAccount::listSupergroups(std::vector<SupergroupRef>& out, std::string& error) {
-    TlValue req = TlValue::makeObject("messages.getDialogs");
-    req.setInt("offset_date", 0);
-    req.setInt("offset_id", 0);
-    req.set("offset_peer", TlValue::makeObject("inputPeerEmpty"));
-    req.setInt("limit", 100);
-    req.setLong("hash", 0);
+    // Duyệt nhiều trang: tài khoản dùng lâu có thể có hàng trăm hội thoại, siêu
+    // nhóm lưu trữ chưa chắc nằm trong trang đầu.
+    constexpr int kMoiTrang = 100;
+    constexpr int kToiDaTrang = 10;
+    int offsetDate = 0, offsetId = 0;
+    TlValue offsetPeer = TlValue::makeObject("inputPeerEmpty");
+    std::set<int64_t> daThay;
 
-    InvokeResult res = invoke(req);
-    if (!res.ok && !res.partial) {
-        error = res.describe();
-        return false;
-    }
-    std::vector<const TlValue*> channels;
-    collectObjects(res.value, "channel", channels);
-    for (const TlValue* ch : channels) {
-        // Chỉ nhận siêu nhóm (megagroup), bỏ qua kênh phát sóng.
-        if (!(*ch)["megagroup"].asBool()) continue;
-        SupergroupRef ref;
-        ref.channelId = (*ch)["id"].asLong();
-        ref.accessHash = (*ch)["access_hash"].asLong();
-        ref.title = (*ch)["title"].asString();
-        if (ref.valid()) out.push_back(ref);
+    for (int trang = 0; trang < kToiDaTrang; ++trang) {
+        TlValue req = TlValue::makeObject("messages.getDialogs");
+        req.setInt("offset_date", offsetDate);
+        req.setInt("offset_id", offsetId);
+        req.set("offset_peer", offsetPeer);
+        req.setInt("limit", kMoiTrang);
+        req.setLong("hash", 0);
+
+        InvokeResult res = invoke(req);
+        if (!res.ok && !res.partial) {
+            if (trang == 0) {
+                error = res.describe();
+                return false;
+            }
+            break;  // đã lấy được vài trang thì dùng tạm chỗ đó
+        }
+
+        std::vector<const TlValue*> channels;
+        collectObjects(res.value, "channel", channels);
+        size_t truoc = out.size();
+        for (const TlValue* ch : channels) {
+            // Chỉ nhận siêu nhóm (megagroup), bỏ qua kênh phát sóng.
+            if (!(*ch)["megagroup"].asBool()) continue;
+            SupergroupRef ref;
+            ref.channelId = (*ch)["id"].asLong();
+            ref.accessHash = (*ch)["access_hash"].asLong();
+            ref.title = (*ch)["title"].asString();
+            if (!ref.valid() || !daThay.insert(ref.channelId).second) continue;
+            out.push_back(ref);
+            // Nhớ luôn access_hash: nó chỉ đúng với chính tài khoản này.
+            std::lock_guard<std::mutex> lk(mu_);
+            groupHash_[ref.channelId] = ref.accessHash;
+        }
+
+        // Hết dữ liệu khi máy chủ trả về danh sách không còn hội thoại mới.
+        std::vector<const TlValue*> dialogs;
+        collectObjects(res.value, "dialog", dialogs);
+        if (dialogs.size() < static_cast<size_t>(kMoiTrang)) break;
+        if (out.size() == truoc && channels.empty()) break;
+
+        // Trang kế tiếp bắt đầu từ hội thoại cuối cùng.
+        const TlValue* cuoi = dialogs.back();
+        offsetId = (*cuoi)["top_message"].asInt();
+        std::vector<const TlValue*> msgs;
+        collectObjects(res.value, "message", msgs);
+        if (!msgs.empty()) offsetDate = (*msgs.back())["date"].asInt();
+        if (offsetId == 0 && offsetDate == 0) break;
     }
     return true;
+}
+
+bool TgAccount::localizeGroup(const SupergroupRef& group, SupergroupRef& out,
+                              std::string& error) {
+    if (!group.valid()) {
+        error = "Chưa cấu hình siêu nhóm lưu trữ";
+        return false;
+    }
+    out = group;
+    {
+        std::lock_guard<std::mutex> lk(mu_);
+        auto it = groupHash_.find(group.channelId);
+        if (it != groupHash_.end()) {
+            out.accessHash = it->second;
+            return true;
+        }
+    }
+
+    // Chưa biết hash của riêng tài khoản này — tìm trong danh sách hội thoại.
+    std::vector<SupergroupRef> ds;
+    std::string loi;
+    if (!listSupergroups(ds, loi)) {
+        error = "Không đọc được danh sách nhóm của tài khoản " + config_.label + ": " + loi;
+        return false;
+    }
+    for (const SupergroupRef& g : ds) {
+        if (g.channelId != group.channelId) continue;
+        out.accessHash = g.accessHash;
+        if (out.title.empty()) out.title = g.title;
+        LOG_INFO(kTag, "[%s] Đã lấy access_hash riêng cho siêu nhóm '%s'",
+                 config_.label.c_str(), out.title.c_str());
+        return true;
+    }
+
+    error = "Tài khoản " + config_.label +
+            " chưa vào siêu nhóm lưu trữ. Hãy mời tài khoản này vào nhóm rồi thử lại.";
+    return false;
 }
 
 // ---------------------------------------------------------------------------
@@ -590,7 +662,16 @@ void TgAccount::StreamUpload::abort() {
 
 std::unique_ptr<TgAccount::StreamUpload> TgAccount::beginStreamUpload(
     const SupergroupRef& group, uint64_t totalSize, const std::string& fileName) {
-    return std::unique_ptr<StreamUpload>(new StreamUpload(*this, group, totalSize, fileName));
+    // Dùng access_hash của riêng tài khoản này, nếu không Telegram trả về
+    // CHANNEL_INVALID ngay lúc gửi tin nhắn chứa mảnh.
+    SupergroupRef cuaToi;
+    std::string loi;
+    if (!localizeGroup(group, cuaToi, loi)) {
+        setLastError(loi);
+        LOG_WARN(kTag, "[%s] %s", config_.label.c_str(), loi.c_str());
+        return nullptr;
+    }
+    return std::unique_ptr<StreamUpload>(new StreamUpload(*this, cuaToi, totalSize, fileName));
 }
 
 bool TgAccount::uploadChunk(const SupergroupRef& group, const Bytes& data,
@@ -681,9 +762,11 @@ bool TgAccount::downloadRange(const ChunkLocation& loc, uint64_t offset, uint32_
     return true;
 }
 
-bool TgAccount::deleteMessages(const SupergroupRef& group,
+bool TgAccount::deleteMessages(const SupergroupRef& groupGoc,
                                const std::vector<int64_t>& messageIds, std::string& error) {
     if (messageIds.empty()) return true;
+    SupergroupRef group;
+    if (!localizeGroup(groupGoc, group, error)) return false;
     // Xoá theo lô 100 thông điệp mỗi lần.
     for (size_t i = 0; i < messageIds.size(); i += 100) {
         TlVector ids;
@@ -703,8 +786,10 @@ bool TgAccount::deleteMessages(const SupergroupRef& group,
     return true;
 }
 
-bool TgAccount::refreshFileReference(const SupergroupRef& group, ChunkLocation& loc,
+bool TgAccount::refreshFileReference(const SupergroupRef& groupGoc, ChunkLocation& loc,
                                      std::string& error) {
+    SupergroupRef group;
+    if (!localizeGroup(groupGoc, group, error)) return false;
     TlValue msgId = TlValue::makeObject("inputMessageID");
     msgId.setInt("id", static_cast<int32_t>(loc.messageId));
     TlVector ids;

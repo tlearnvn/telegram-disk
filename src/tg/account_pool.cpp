@@ -253,12 +253,15 @@ bool AccountPool::ready(std::string& why) const {
     return false;
 }
 
-TgAccount* AccountPool::pickAccount(std::string& error) {
+TgAccount* AccountPool::pickAccount(std::string& error, const std::vector<int>& boQua) {
     std::lock_guard<std::mutex> lk(mu_);
     if (accounts_.empty()) {
         error = "Chưa có tài khoản Telegram nào";
         return nullptr;
     }
+    auto biBoQua = [&boQua](int id) {
+        return std::find(boQua.begin(), boQua.end(), id) != boQua.end();
+    };
     TgAccount* best = nullptr;
     int bestLoad = std::numeric_limits<int>::max();
     int64_t now = nowUnix();
@@ -271,6 +274,7 @@ TgAccount* AccountPool::pickAccount(std::string& error) {
         if (itEn != enabled_.end() && !itEn->second) continue;
         if (!a->authorized()) continue;
         if (a->statusText() == "Đang chờ giới hạn tần suất") continue;
+        if (biBoQua(a->id())) continue;
         (void)now;
         int load = activeUploads_.count(a->id()) ? activeUploads_[a->id()] : 0;
         if (load < bestLoad) {
@@ -315,18 +319,36 @@ std::unique_ptr<ChunkWriter> AccountPool::beginChunk(uint64_t totalSize,
         error = "Chưa cấu hình siêu nhóm lưu trữ";
         return nullptr;
     }
-    TgAccount* account = pickAccount(error);
-    if (!account) return nullptr;
+    // Thử tài khoản rảnh nhất trước; tài khoản nào không vào được siêu nhóm thì
+    // bỏ qua và thử tài khoản kế tiếp, thay vì làm hỏng cả phiên tải lên.
+    std::vector<int> daThu;
+    std::string lyDoCuoi;
+    for (size_t vong = 0; vong < accountCount() + 1; ++vong) {
+        TgAccount* account = pickAccount(error, daThu);
+        if (!account) break;
+        daThu.push_back(account->id());
 
-    std::string connectError;
-    if (!account->connected() && !account->connect(connectError)) {
-        error = "Tài khoản " + account->label() + " không kết nối được: " + connectError;
-        return nullptr;
+        std::string connectError;
+        if (!account->connected() && !account->connect(connectError)) {
+            lyDoCuoi = "Tài khoản " + account->label() + " không kết nối được: " + connectError;
+            LOG_WARN(kTag, "%s", lyDoCuoi.c_str());
+            continue;
+        }
+
+        auto upload = account->beginStreamUpload(group, totalSize, chunkName);
+        if (!upload) {
+            lyDoCuoi = account->lastError().empty()
+                           ? ("Tài khoản " + account->label() + " không gửi được vào siêu nhóm")
+                           : account->lastError();
+            continue;
+        }
+        return std::unique_ptr<ChunkWriter>(
+            new PoolChunkWriter(*this, account, std::move(upload), account->label()));
     }
 
-    auto upload = account->beginStreamUpload(group, totalSize, chunkName);
-    return std::unique_ptr<ChunkWriter>(
-        new PoolChunkWriter(*this, account, std::move(upload), account->label()));
+    if (!lyDoCuoi.empty()) error = lyDoCuoi;
+    else if (error.empty()) error = "Không có tài khoản Telegram nào dùng được";
+    return nullptr;
 }
 
 bool AccountPool::readRange(const ChunkLocation& loc, uint64_t offset, uint32_t limit,

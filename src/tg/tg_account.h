@@ -104,6 +104,12 @@ public:
     // Liệt kê các cuộc trò chuyện dạng siêu nhóm mà tài khoản đang tham gia.
     bool listSupergroups(std::vector<SupergroupRef>& out, std::string& error);
 
+    // access_hash của một kênh do Telegram cấp RIÊNG cho từng tài khoản: hash
+    // mà tài khoản A nhận được thì tài khoản B dùng không được, máy chủ trả về
+    // CHANNEL_INVALID. Hàm này đổi tham chiếu nhóm sang bản hợp lệ với chính
+    // tài khoản này — tìm trong danh sách hội thoại của nó rồi nhớ lại.
+    bool localizeGroup(const SupergroupRef& group, SupergroupRef& out, std::string& error);
+
     // Tải một mảnh dữ liệu đã nằm sẵn trong bộ nhớ lên Telegram.
     bool uploadChunk(const SupergroupRef& group, const Bytes& data, const std::string& fileName,
                      ChunkLocation& out, const ProgressCallback& progress,
@@ -167,6 +173,8 @@ private:
 
     mutable std::mutex mu_;
     std::map<int, std::unique_ptr<MtprotoSession>> sessions_;
+    // channel_id → access_hash hợp lệ với riêng tài khoản này.
+    std::map<int64_t, int64_t> groupHash_;
     std::map<int, AuthKey> loadedKeys_;
     std::atomic<bool> authorized_{false};
     std::atomic<uint64_t> bytesUploaded_{0};

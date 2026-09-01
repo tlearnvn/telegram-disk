@@ -73,8 +73,9 @@ public:
     bool removeChunks(const std::vector<ChunkLocation>& locations, std::string& error) override;
     BackendStats stats() const override;
 
-    // Chọn tài khoản rảnh nhất để giao việc.
-    TgAccount* pickAccount(std::string& error);
+    // Chọn tài khoản rảnh nhất để giao việc. `boQua` liệt kê mã những tài khoản
+    // vừa thử mà không dùng được, để vòng sau chọn tài khoản khác.
+    TgAccount* pickAccount(std::string& error, const std::vector<int>& boQua = {});
     // Chọn tài khoản phù hợp để đọc dữ liệu (ưu tiên tài khoản đã tải lên mảnh đó).
     TgAccount* pickForRead(const ChunkLocation& loc, std::string& error);
 
