@@ -10,8 +10,10 @@ THU_MUC_BUILD="${GOC}/build"
 THU_MUC_XUAT="${GOC}/dist/linux-amd64"
 KIEU="${TTD_BUILD_TYPE:-Release}"
 SO_LUONG="${TTD_JOBS:-$(nproc 2>/dev/null || echo 4)}"
-# TTD_FULLY_STATIC=1 để liên kết tĩnh hoàn toàn (kể cả glibc).
-HOAN_TOAN_TINH="${TTD_FULLY_STATIC:-0}"
+# Liên kết tĩnh hoàn toàn (kể cả glibc) là MẶC ĐỊNH: bản build trên máy có
+# glibc mới sẽ không chạy được trên máy chủ glibc cũ hơn ('GLIBC_2.38 not
+# found'). Đặt TTD_FULLY_STATIC=0 nếu cố tình muốn liên kết động.
+HOAN_TOAN_TINH="${TTD_FULLY_STATIC:-1}"
 
 mau()   { printf '\033[%sm%s\033[0m\n' "$1" "$2"; }
 buoc()  { mau '1;36' "▸ $*"; }
@@ -43,6 +45,35 @@ if "$THU_MUC_BUILD/ttd_selftest"; then
 else
   loi "Tự kiểm tra thất bại — dừng lại"
   exit 1
+fi
+
+buoc "Kiểm tra tệp thực thi chạy được trên máy chủ glibc cũ"
+BIN="$THU_MUC_BUILD/tuan-telegram-disk"
+if [ "$HOAN_TOAN_TINH" = "1" ]; then
+  # Kiểm ở tầng ELF chứ không dùng ldd: ldd trả mã thoát 1 với tệp tĩnh, gặp
+  # `set -o pipefail` là hỏng cả phép kiểm.
+  SO_INTERP="$(readelf -l "$BIN" 2>/dev/null | grep -c INTERP || true)"
+  SO_NEEDED="$(objdump -p "$BIN" 2>/dev/null | grep -c NEEDED || true)"
+  SO_GLIBC="$(objdump -T "$BIN" 2>/dev/null | grep -c GLIBC_ || true)"
+  if [ "$SO_INTERP" = "0" ] && [ "$SO_NEEDED" = "0" ] && [ "$SO_GLIBC" = "0" ]; then
+    xong "Liên kết tĩnh hoàn toàn — không phụ thuộc glibc của máy đích"
+  else
+    loi "Đã bật TTD_FULLY_STATIC nhưng tệp vẫn liên kết động"
+    loi "  INTERP=$SO_INTERP  NEEDED=$SO_NEEDED  symbol GLIBC=$SO_GLIBC"
+    exit 1
+  fi
+else
+  # Liên kết động: bản build trên máy glibc mới sẽ chết trên máy chủ glibc cũ
+  # với lỗi "version GLIBC_x.yz not found". Chỉ cho qua khi đủ cũ để phổ biến.
+  CAN="$(objdump -T "$BIN" 2>/dev/null | grep -oP 'GLIBC_\K[0-9.]+' | sort -uV | tail -1)"
+  echo "   cần glibc tối thiểu: ${CAN:-không rõ}"
+  TOI_DA="2.31"   # Debian 11 / Ubuntu 20.04
+  if [ -n "$CAN" ] && [ "$(printf '%s\n%s\n' "$CAN" "$TOI_DA" | sort -V | tail -1)" != "$TOI_DA" ]; then
+    loi "Cần glibc $CAN — máy chủ cũ hơn sẽ báo 'GLIBC_$CAN not found'."
+    loi "Hãy dựng lại với TTD_FULLY_STATIC=1 (mặc định), hoặc build trên máy glibc cũ hơn."
+    exit 1
+  fi
+  xong "Phụ thuộc glibc đủ cũ để chạy rộng rãi"
 fi
 
 buoc "Đóng gói vào $THU_MUC_XUAT"

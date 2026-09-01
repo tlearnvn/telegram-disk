@@ -194,6 +194,15 @@ sudo apt install build-essential cmake
 # Kết quả: dist/linux-amd64/tuan-telegram-disk
 ```
 
+Bản Linux được **liên kết tĩnh hoàn toàn**, kể cả glibc — chạy được trên mọi bản
+phân phối amd64 mà không cần cài gì. Script tự kiểm tra điều này trước khi đóng
+gói: tệp thực thi phải không có `INTERP`, không có `NEEDED`, không có symbol
+`GLIBC_` nào.
+
+> Liên kết động thì tệp build trên máy glibc mới sẽ **không chạy** trên máy chủ
+> glibc cũ, báo `version 'GLIBC_2.38' not found`. Muốn build động thì đặt
+> `TTD_FULLY_STATIC=0`, và script sẽ chặn nếu phụ thuộc glibc mới hơn 2.31.
+
 ### Windows x64 (biên dịch chéo từ Linux)
 
 ```bash

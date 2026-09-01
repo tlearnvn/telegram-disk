@@ -387,6 +387,18 @@ vào siêu nhóm ở bước 2, rồi bấm **Kết nối lại tất cả**. �
 tài khoản này và dùng tài khoản khác trong lúc chờ, nên việc tải lên không bị
 gián đoạn.
 
+### `version 'GLIBC_2.38' not found` khi chạy trên máy chủ
+
+Tệp thực thi được build trên máy có glibc mới hơn máy chủ. Bản phát hành từ
+build 53 trở đi đã **liên kết tĩnh hoàn toàn** nên không còn lỗi này — tải lại
+gói mới là chạy được.
+
+Tự build thì đừng tắt `TTD_FULLY_STATIC` (mặc định đã bật). Kiểm tra nhanh:
+
+```bash
+ldd tuan-telegram-disk     # phải in "not a dynamic executable"
+```
+
 ### `FLOOD_WAIT`
 
 Telegram bắt chờ vì gửi quá nhanh. Ứng dụng tự chờ rồi thử lại. Bị thường xuyên
