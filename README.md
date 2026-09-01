@@ -5,6 +5,13 @@
 
 **Thiết kế bởi Tuandethuong.**
 
+📖 **[Hướng dẫn sử dụng](docs/HUONG-DAN-SU-DUNG.md)** — từ lúc cài đặt tới khi
+gắn ổ đĩa vào máy tính, kèm ảnh chụp từng bước.
+🔧 **[Quy trình kỹ thuật](docs/QUY-TRINH-KY-THUAT.md)** — kiến trúc, đường đi của
+dữ liệu, MTProto, kèm sơ đồ.
+
+![Tệp của tôi](docs/anh/02-tep-cua-toi.png)
+
 ---
 
 ## Ứng dụng làm được gì
