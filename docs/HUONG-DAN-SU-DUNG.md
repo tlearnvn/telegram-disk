@@ -367,6 +367,26 @@ my.telegram.org:
   `api.tl` mới đè lên rồi khởi động lại, kiểm tra bằng
   `./tuan-telegram-disk --check-schema`
 
+### `CHANNEL_INVALID` khi tải tệp lớn
+
+Nếu bạn đang chạy bản cũ hơn build 37: tệp nhỏ (một mảnh) thì lên bình thường,
+tệp lớn (nhiều mảnh) lại hỏng giữa chừng ở mảnh thứ hai trở đi. Nguyên nhân là
+`access_hash` của siêu nhóm được Telegram cấp riêng cho từng tài khoản, mà bản
+cũ dùng chung một hash cho mọi tài khoản. **Cập nhật lên bản mới là hết.**
+
+Bản mới in ra dòng này cho từng tài khoản ở lần dùng đầu tiên:
+
+```
+[tg.acc] [Tên tài khoản] Đã lấy access_hash riêng cho siêu nhóm 'Tên nhóm'
+```
+
+### "Tài khoản X chưa vào siêu nhóm lưu trữ"
+
+Đúng như thông báo: tài khoản đó chưa phải thành viên nhóm. Mở Telegram, mời nó
+vào siêu nhóm ở bước 2, rồi bấm **Kết nối lại tất cả**. Ứng dụng sẽ tự bỏ qua
+tài khoản này và dùng tài khoản khác trong lúc chờ, nên việc tải lên không bị
+gián đoạn.
+
 ### `FLOOD_WAIT`
 
 Telegram bắt chờ vì gửi quá nhanh. Ứng dụng tự chờ rồi thử lại. Bị thường xuyên

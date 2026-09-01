@@ -448,6 +448,44 @@ flowchart LR
 
 Yêu cầu bắt buộc: **tất cả tài khoản phải là thành viên của siêu nhóm**.
 
+### access_hash là của riêng từng tài khoản
+
+Đây là chỗ dễ vấp nhất khi làm nhiều tài khoản, và cũng là một lỗi thật của dự
+án này.
+
+Để gửi tin nhắn vào một kênh, MTProto cần `inputPeerChannel(channel_id,
+access_hash)`. Cái `channel_id` thì chung cho mọi người, nhưng **`access_hash`
+được Telegram cấp riêng cho từng tài khoản**. Hash mà tài khoản A nhận được là
+vô nghĩa với tài khoản B — máy chủ trả về `CHANNEL_INVALID`.
+
+Bản đầu tiên lưu đúng một `access_hash` trong cấu hình (của tài khoản đã chọn
+siêu nhóm) rồi đưa cho mọi tài khoản dùng chung. Hậu quả: mảnh nào rơi vào tài
+khoản khác là hỏng cả phiên tải lên. Lỗi chỉ lộ ra khi có **từ hai tài khoản trở
+lên** *và* tệp đủ lớn để sinh **nhiều mảnh** — đúng cái kịch bản mà tính năng
+nhiều tài khoản sinh ra để phục vụ, nên tệp nhỏ thử bao nhiêu lần cũng không ra.
+
+```mermaid
+flowchart TD
+    A["Cần gửi mảnh vào siêu nhóm"] --> B{"Tài khoản này đã biết<br/>access_hash của nhóm chưa?"}
+    B -- Rồi --> C["Dùng hash đã nhớ"]
+    B -- Chưa --> D["Duyệt danh sách hội thoại<br/>của chính tài khoản này"]
+    D --> E{"Tìm thấy channel_id?"}
+    E -- Có --> F["Nhớ lại hash rồi dùng"]
+    E -- Không --> G["Báo: tài khoản chưa vào siêu nhóm"]
+    C --> H["inputPeerChannel hợp lệ"]
+    F --> H
+```
+
+Cách làm hiện tại: mỗi tài khoản tự tìm nhóm trong danh sách hội thoại **của
+chính nó** để lấy hash đúng, rồi nhớ lại theo `channel_id`. Tài khoản chưa được
+mời vào nhóm sẽ báo rõ lý do thay vì mã lỗi khó hiểu, và nhóm tài khoản sẽ thử
+tài khoản khác thay vì làm hỏng cả phiên.
+
+Cùng một lý do, `access_hash` của **tài liệu** cũng theo từng tài khoản. Khi đọc
+bằng tài khoản khác, tham chiếu cũ có thể không dùng được — đường làm mới
+`file_reference` gọi `channels.getMessages` bằng chính tài khoản đang đọc nên tự
+lấy được bộ giá trị hợp lệ.
+
 ---
 
 ## 11. Cơ sở dữ liệu
@@ -584,19 +622,26 @@ Trên máy người dùng, không phải máy dựng bản build:
 | Đăng nhập tài khoản thật, nhận mã xác thực | Đạt |
 | Chuyển trung tâm dữ liệu DC2 → DC5 | Đạt |
 | Liệt kê và chọn siêu nhóm lưu trữ | Đạt |
-| Tải tệp 242 MB lên siêu nhóm, tốc độ ~1,65 MB/s | Đạt |
 | Tải tệp 77 KB lên siêu nhóm | Đạt |
+| Tải tệp 242 MB lên siêu nhóm, tốc độ ~1,65 MB/s | Đạt |
+| **Tệp 1,85 GB cắt thành 4 mảnh 500 MB, đủ cả 4 mảnh** | Đạt |
+| **Ba tài khoản cùng chia tải, mỗi mảnh một tài khoản** | Đạt |
+| **Mỗi tài khoản tự lấy `access_hash` riêng cho siêu nhóm** | Đạt |
+| Lưu khoá phiên khi thoát, không mất khoá của DC nào | Đạt |
 
 ### Chưa kiểm chứng
 
 Những phần này **chưa ai chạy thử**, hãy coi là chưa được bảo chứng:
 
-- Tải về và tua video **từ Telegram thật** (mới chỉ kiểm với backend nội bộ)
-- Tệp lớn hơn cỡ mảnh khi chạy trên Telegram thật (tức là **nhiều mảnh thật**)
-- Nhiều tài khoản chia tải trên Telegram thật
-- Chuyển tiếp khi bị `FLOOD_WAIT`, và làm mới `file_reference` khi hết hạn
-- MySQL làm nơi lưu siêu dữ liệu (trình điều khiển có bộ kiểm tra riêng, nhưng
-  chưa chạy với máy chủ MySQL thật)
+- **Tải về và tua video từ Telegram thật.** Đường tải lên đã chạy thật tới tệp
+  1,85 GB, nhưng đường tải về mới chỉ kiểm với backend nội bộ. Ghép mảnh, Range
+  và bộ đệm khối đều chạy đúng ở đó — chỗ chưa biết là `upload.getFile` với dữ
+  liệu thật.
+- **Chuyển tiếp khi bị `FLOOD_WAIT`**, và **làm mới `file_reference`** khi hết
+  hạn. Hai đường này chỉ kích hoạt khi Telegram thực sự trả về lỗi tương ứng.
+- **MySQL** làm nơi lưu siêu dữ liệu. Trình điều khiển có bộ kiểm tra riêng
+  nhưng chưa chạy với máy chủ MySQL thật.
+- **Xoá hẳn tệp trên Telegram thật** (`channels.deleteMessages`).
 
 ---
 
