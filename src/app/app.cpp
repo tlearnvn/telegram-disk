@@ -21,7 +21,7 @@ constexpr const char* kTag = "app";
 
 // Thông tin ứng dụng gửi kèm trong initConnection. Dựng ở một chỗ duy nhất để
 // lúc khởi động và lúc lưu Cài đặt không bao giờ lệch nhau.
-tg::AppInfo buildAppInfo(const Config& cfg) {
+tg::AppInfo buildAppInfo(const Config& cfg, int schemaLayer) {
     tg::AppInfo info;
     info.apiId = cfg.telegram.apiId;
     info.apiHash = cfg.telegram.apiHash;
@@ -30,7 +30,9 @@ tg::AppInfo buildAppInfo(const Config& cfg) {
     info.appVersion = std::string(version::kVersion);
     info.langCode = cfg.telegram.langCode;
     info.systemLangCode = cfg.telegram.langCode;
-    info.layer = cfg.telegram.layer;
+    // Khai đúng layer của schema đang nạp, nếu không máy chủ sẽ trả về hàm dựng
+    // thuộc phiên bản khác và giải mã sẽ hỏng giữa chừng.
+    info.layer = cfg.telegram.layer > 0 ? cfg.telegram.layer : schemaLayer;
     return info;
 }
 }  // namespace
@@ -165,7 +167,7 @@ bool App::initBackend(std::string& error) {
                  "Đang chạy ở CHẾ ĐỘ THỬ NGHIỆM — dữ liệu lưu trên đĩa máy này, "
                  "không đẩy lên Telegram.");
     } else {
-        tg::AppInfo info = buildAppInfo(cfg);
+        tg::AppInfo info = buildAppInfo(cfg, schema_.layer());
         if (info.apiId == 0 || info.apiHash.empty()) {
             LOG_WARN(kTag,
                      "Chưa có api_id/api_hash — hãy vào Cài đặt điền trước khi thêm tài "
@@ -413,7 +415,7 @@ bool App::addAccountAndSendCode(const std::string& label, const std::string& pho
     // Đồng bộ lại lần nữa cho chắc: tài khoản mới phải mang đúng api_id đang
     // có trong cấu hình, kể cả khi cấu hình vừa đổi qua một đường khác.
     {
-        tg::AppInfo info = buildAppInfo(cfg);
+        tg::AppInfo info = buildAppInfo(cfg, schema_.layer());
         if (info.apiId != pool_->appInfo().apiId ||
             info.apiHash != pool_->appInfo().apiHash) {
             pool_->updateAppInfo(info);
@@ -649,7 +651,7 @@ bool App::applySettings(const Json& settings, std::string& error) {
     // đẩy xuống pool ở đây thì mọi tài khoản vẫn gửi api_id cũ (thường là 0)
     // trong initConnection và Telegram trả về CONNECTION_API_ID_INVALID.
     if (pool_) {
-        tg::AppInfo info = buildAppInfo(cfg);
+        tg::AppInfo info = buildAppInfo(cfg, schema_.layer());
         tg::AppInfo current = pool_->appInfo();
         if (info.apiId != current.apiId || info.apiHash != current.apiHash ||
             info.deviceModel != current.deviceModel ||

@@ -53,7 +53,10 @@ struct TelegramConfig {
     std::string systemVersion = "1.0";
     std::string appVersion = "1.0";
     std::string langCode = "vi";
-    int layer = 158;
+    // 0 = dùng đúng số hiệu layer ghi trong tệp schema. Để số khác 0 chỉ khi
+    // muốn ép một layer cụ thể — khai layer lệch với schema sẽ khiến máy chủ
+    // gửi về hàm dựng mà ứng dụng không giải mã được.
+    int layer = 0;
     bool testMode = false;
     bool obfuscated = false;
     int connectionsPerAccount = 1;

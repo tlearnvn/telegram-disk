@@ -245,6 +245,10 @@ Toàn bộ phần mật mã, nén, mạng, cơ sở dữ liệu MySQL và máy c
 ## Về tệp schema Telegram
 
 Giao thức Telegram (TL) mô tả trong `schema/mtproto.tl` và `schema/api.tl`.
+`api.tl` là bản chính thức lấy từ mã nguồn mở Telegram Desktop (**layer 229**,
+2511 hàm dựng); ứng dụng đọc số layer ngay trong tệp rồi khai đúng số đó với máy
+chủ, nên hai bên luôn dùng chung một bộ hàm dựng.
+
 Định danh mỗi hàm dựng được tính bằng **CRC32 của chuỗi khai báo đã chuẩn hoá**,
 theo đúng quy tắc của Telegram:
 
@@ -253,9 +257,15 @@ theo đúng quy tắc của Telegram:
 3. Đổi kiểu `bytes` thành `string` (chỉ ở vị trí kiểu, không đổi tên trường)
 4. CRC32 của chuỗi thu được
 
+Quy tắc này đã được đối chiếu với toàn bộ schema chính thức: **2503/2511** hàm
+dựng khớp CRC32. Tám hàm dựng còn lại là những chỗ Telegram cố tình giữ định
+danh cũ sau khi đổi trường — ứng dụng ưu tiên định danh ghi trong tệp và chỉ ghi
+một dòng cảnh báo.
+
 Nhờ vậy, khi Telegram nâng layer bạn **không cần biên dịch lại**: chỉ việc đặt tệp
 `api.tl` mới vào thư mục `schema/` cạnh tệp thực thi (hoặc trỏ tới nó bằng
-`telegram.schema_file`). Kiểm tra bằng:
+`telegram.schema_file`); layer khai với máy chủ sẽ tự bám theo tệp mới. Kiểm tra
+bằng:
 
 ```bash
 ./tuan-telegram-disk --check-schema
@@ -263,7 +273,9 @@ Nhờ vậy, khi Telegram nâng layer bạn **không cần biên dịch lại**:
 
 Bộ giải mã còn hỗ trợ **giải mã một phần**: nếu gặp hàm dựng lạ ở trường lồng bên
 trong, những trường đã đọc được vẫn giữ nguyên, nên đường tải lên/tải xuống vẫn
-chạy ngay cả khi schema lệch đôi chút so với máy chủ.
+chạy ngay cả khi schema lệch đôi chút so với máy chủ. Lưu ý TL không tự mô tả độ
+dài, nên hàm dựng lạ nằm giữa một danh sách sẽ làm mất phần đứng sau nó — vì thế
+hãy giữ `api.tl` cập nhật thay vì trông cậy vào giải mã một phần.
 
 ---
 

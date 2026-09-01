@@ -399,9 +399,28 @@ void testTl() {
          "có " + std::to_string(schema.size()));
     kiem(schema.layer() >= 100, "đọc được số hiệu layer",
          "layer " + std::to_string(schema.layer()));
-    // Chỉ msg_container được phép lệch (đặc tả MTProto cố định ID này).
-    kiem(canhBao.size() <= 1, "định danh khai báo khớp CRC32",
-         std::to_string(canhBao.size()) + " cảnh báo");
+    // Quy tắc CRC32 phải khớp với mọi khai báo, trừ đúng những hàm dựng mà
+    // Telegram cố tình giữ định danh cũ sau khi đổi trường (và msg_container do
+    // đặc tả MTProto cố định). Liệt kê tường minh để nếu quy tắc chuẩn hoá bị
+    // hỏng thì cảnh báo lạ sẽ lộ ra ngay chứ không lẫn vào một con số.
+    static const char* kNgoaiLe[] = {"msg_container",
+                                     "updateMessagePollVote",
+                                     "updateGroupCallChainBlocks",
+                                     "secureValueErrorFiles",
+                                     "secureValueErrorTranslationFiles",
+                                     "codeSettings",
+                                     "messagePeerVoteMultiple",
+                                     "messages.sendVote",
+                                     nullptr};
+    std::vector<std::string> laLung;
+    for (const auto& w : canhBao) {
+        bool biet = false;
+        for (int i = 0; kNgoaiLe[i]; ++i)
+            if (startsWith(w, std::string(kNgoaiLe[i]) + ":")) biet = true;
+        if (!biet) laLung.push_back(w);
+    }
+    kiem(laLung.empty(), "định danh khai báo khớp CRC32 (trừ ngoại lệ đã biết)",
+         laLung.empty() ? "" : join(laLung, " | "));
 
     static const char* kCanCo[] = {
         "req_pq_multi", "req_DH_params", "set_client_DH_params", "invokeWithLayer",
@@ -410,11 +429,21 @@ void testTl() {
         "inputPeerChannel", "inputDocumentFileLocation", "channels.getMessages",
         "channels.deleteMessages", "auth.sendCode", "auth.signIn", "auth.checkPassword",
         "account.getPassword", "document", "message", "messageMediaDocument", "updates",
-        "config", "dcOption", "channel", "user", nullptr};
-    int thieu = 0;
+        "config", "dcOption", "channel", "user",
+        // Cây kết quả của messages.getDialogs — thiếu một mắt xích ở đây là
+        // không liệt kê được siêu nhóm, vì Vector<Dialog> nằm TRƯỚC chats.
+        "messages.getDialogs", "messages.dialogs", "messages.dialogsSlice", "dialog",
+        "dialogFolder", "peerChannel", "peerChat", "peerUser", "peerNotifySettings",
+        "inputPeerEmpty", nullptr};
+    std::vector<std::string> thieuTen;
     for (int i = 0; kCanCo[i]; ++i)
-        if (!schema.byName(kCanCo[i])) ++thieu;
-    kiem(thieu == 0, "có đủ hàm dựng ứng dụng cần", std::to_string(thieu) + " thiếu");
+        if (!schema.byName(kCanCo[i])) thieuTen.push_back(kCanCo[i]);
+    kiem(thieuTen.empty(), "có đủ hàm dựng ứng dụng cần", join(thieuTen, ", "));
+
+    // Schema phải đủ mới, nếu không máy chủ sẽ trả về hàm dựng lạ và giải mã
+    // hỏng giữa chừng — đúng lỗi đã gặp khi liệt kê siêu nhóm với layer 158.
+    kiem(schema.layer() >= 200, "schema đủ mới cho máy chủ hiện nay",
+         "layer " + std::to_string(schema.layer()));
 
     // Mã hoá / giải mã qua lại.
     TlCodec codec(schema);
