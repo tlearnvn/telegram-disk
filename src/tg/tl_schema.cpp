@@ -93,7 +93,20 @@ std::string TlSchema::normalizeDeclaration(const std::string& declaration) {
     }
     std::string joined = join(kept, " ");
 
-    // Bước 2: đổi ngoặc thành khoảng trắng.
+    // Bước 2: `bytes` được tính CRC như `string`, nhưng CHỈ khi nó là kiểu trực
+    // tiếp của trường (`ten:bytes`, `ten:flags.N?bytes`). Nằm trong tham số kiểu
+    // như `Vector<bytes>` thì giữ nguyên — đối chiếu với schema chính thức cho
+    // thấy Telegram không đổi ở đó (codeSettings, messages.sendVote,
+    // secureValueErrorFiles… đều chỉ khớp khi giữ nguyên).
+    // Phải làm TRƯỚC khi bỏ ngoặc, vì bỏ rồi thì không còn phân biệt được.
+    std::vector<std::string> pre = tokenize(joined);
+    for (auto& tok : pre) {
+        if (endsWith(tok, ":bytes") || endsWith(tok, "?bytes"))
+            tok = tok.substr(0, tok.size() - 5) + "string";
+    }
+    joined = join(pre, " ");
+
+    // Bước 3: đổi ngoặc thành khoảng trắng rồi gộp khoảng trắng thừa.
     std::string tmp;
     tmp.reserve(joined.size());
     for (char c : joined) {
@@ -102,17 +115,7 @@ std::string TlSchema::normalizeDeclaration(const std::string& declaration) {
         else
             tmp.push_back(c);
     }
-
-    // Bước 3: kiểu `bytes` được tính CRC như `string` (chỉ ở vị trí kiểu).
-    std::vector<std::string> toks = tokenize(tmp);
-    for (auto& tok : toks) {
-        if (tok == "bytes") {
-            tok = "string";
-        } else if (endsWith(tok, ":bytes") || endsWith(tok, "?bytes")) {
-            tok = tok.substr(0, tok.size() - 5) + "string";
-        }
-    }
-    return join(toks, " ");
+    return join(tokenize(tmp), " ");
 }
 
 uint32_t TlSchema::computeId(const std::string& declaration) {
@@ -174,7 +177,14 @@ bool TlSchema::parseLine(const std::string& rawLine, bool isFunction,
 
     if (hasDeclaredId) {
         ctor->id = declaredId;
-        if (computed != declaredId && warnings) {
+        // Vài hàm dựng lõi MTProto có định danh do đặc tả ấn định cứng, không
+        // suy ra từ CRC32 của khai báo. Chúng luôn "lệch" nên đừng báo động.
+        static const char* kAnDinhCung[] = {"msg_container", "msg_copy", "gzip_packed",
+                                            "vector", nullptr};
+        bool boQuaCanhBao = false;
+        for (int i = 0; kAnDinhCung[i]; ++i)
+            if (ctor->name == kAnDinhCung[i]) boQuaCanhBao = true;
+        if (computed != declaredId && warnings && !boQuaCanhBao) {
             char buf[256];
             std::snprintf(buf, sizeof(buf),
                           "%s: ID khai báo 0x%08x khác ID tính được 0x%08x (dùng ID khai báo)",

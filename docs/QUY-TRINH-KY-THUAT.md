@@ -392,14 +392,19 @@ Telegram mô tả giao thức bằng **TL (Type Language)**. Mỗi hàm dựng c
 danh 4 byte, chính là **CRC32 của chuỗi khai báo sau khi chuẩn hoá**:
 
 1. Bỏ hẳn các trường điều kiện dạng `tên:flagsN.M?true`
-2. Đổi `<` `>` `{` `}` thành khoảng trắng rồi gộp khoảng trắng thừa
-3. Đổi kiểu `bytes` thành `string` — **chỉ ở vị trí kiểu**, không đụng tên trường
+2. Đổi kiểu `bytes` thành `string` khi nó là **kiểu trực tiếp của trường**
+   (`tên:bytes`, `tên:flags.N?bytes`) — không đụng tên trường, và **không đổi**
+   khi nằm trong tham số kiểu như `Vector<bytes>`
+3. Đổi `<` `>` `{` `}` thành khoảng trắng rồi gộp khoảng trắng thừa
 4. CRC32 của chuỗi thu được
 
-Quy tắc này đã được đối chiếu với **toàn bộ** schema chính thức: **2503/2511**
-hàm dựng khớp. Tám hàm dựng còn lại là chỗ Telegram cố tình giữ định danh cũ sau
-khi đổi trường (`codeSettings`, `messages.sendVote`, `msg_container`…); bộ nạp ưu
-tiên định danh ghi trong tệp và chỉ ghi một dòng cảnh báo.
+Thứ tự hai bước giữa không hoán đổi được: bỏ ngoặc trước thì `Vector<bytes>` biến
+thành hai từ rời và không còn phân biệt được với `tên:bytes` nữa.
+
+Quy tắc này đã được đối chiếu với **toàn bộ** schema chính thức: **2510/2511**
+hàm dựng khớp. Ngoại lệ duy nhất là `msg_container` — cùng vài hàm dựng lõi
+MTProto khác — có định danh do đặc tả ấn định cứng chứ không suy ra từ CRC32;
+bộ nạp luôn ưu tiên định danh ghi trong tệp.
 
 Nhờ làm theo schema thay vì sinh mã cứng, **nâng layer không cần biên dịch lại**:
 đặt tệp `api.tl` mới vào thư mục `schema/` là xong. Số layer khai với máy chủ tự

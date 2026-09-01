@@ -385,6 +385,36 @@ void testTl() {
          "định danh dcOption (bytes có điều kiện)");
     kiem(TlSchema::computeId("boolTrue = Bool") == 0x997275b5, "định danh boolTrue");
 
+    // `bytes` chỉ đổi thành `string` khi là kiểu trực tiếp của trường. Nằm
+    // trong Vector<bytes> thì giữ nguyên — mấy hàm dựng dưới đây từng sai vì
+    // đổi cả trong Vector, nên giữ lại làm chốt chặn.
+    kiem(TlSchema::computeId(
+             "messages.sendVote peer:InputPeer msg_id:int options:Vector<bytes> = Updates") ==
+             0x10ea6184,
+         "định danh messages.sendVote (Vector<bytes> giữ nguyên)");
+    kiem(TlSchema::computeId("messagePeerVoteMultiple peer:Peer options:Vector<bytes> "
+                             "date:int = MessagePeerVote") == 0x4628f6e6,
+         "định danh messagePeerVoteMultiple");
+    kiem(TlSchema::computeId("secureValueErrorFiles type:SecureValueType "
+                             "file_hash:Vector<bytes> text:string = SecureValueError") ==
+             0x666220e9,
+         "định danh secureValueErrorFiles");
+    kiem(TlSchema::computeId(
+             "updateMessagePollVote poll_id:long peer:Peer options:Vector<bytes> "
+             "positions:Vector<int> qts:int = Update") == 0x7699f014,
+         "định danh updateMessagePollVote");
+    kiem(TlSchema::computeId(
+             "codeSettings flags:# allow_flashcall:flags.0?true current_number:flags.1?true "
+             "allow_app_hash:flags.4?true allow_missed_call:flags.5?true "
+             "allow_firebase:flags.7?true unknown_number:flags.9?true "
+             "logout_tokens:flags.6?Vector<bytes> token:flags.8?string "
+             "app_sandbox:flags.8?Bool = CodeSettings") == 0xad253d78,
+         "định danh codeSettings (Vector<bytes> có điều kiện)");
+    // Ngược lại: `bytes` là kiểu trực tiếp thì vẫn phải đổi thành `string`.
+    kiem(TlSchema::computeId("upload.saveFilePart file_id:long file_part:int bytes:bytes "
+                             "= Bool") == 0xb304a621,
+         "định danh upload.saveFilePart (:bytes vẫn đổi)");
+
     TlSchema schema;
     std::vector<std::string> canhBao;
     std::string mtproto, apiSchema;

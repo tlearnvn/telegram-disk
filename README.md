@@ -260,14 +260,14 @@ chủ, nên hai bên luôn dùng chung một bộ hàm dựng.
 theo đúng quy tắc của Telegram:
 
 1. Bỏ hẳn các trường điều kiện dạng `tên:flags.N?true`
-2. Đổi `<` `>` `{` `}` thành khoảng trắng rồi gộp khoảng trắng
-3. Đổi kiểu `bytes` thành `string` (chỉ ở vị trí kiểu, không đổi tên trường)
+2. Đổi kiểu `bytes` thành `string` khi nó là kiểu trực tiếp của trường — **không
+   đổi** khi nằm trong `Vector<bytes>`
+3. Đổi `<` `>` `{` `}` thành khoảng trắng rồi gộp khoảng trắng
 4. CRC32 của chuỗi thu được
 
-Quy tắc này đã được đối chiếu với toàn bộ schema chính thức: **2503/2511** hàm
-dựng khớp CRC32. Tám hàm dựng còn lại là những chỗ Telegram cố tình giữ định
-danh cũ sau khi đổi trường — ứng dụng ưu tiên định danh ghi trong tệp và chỉ ghi
-một dòng cảnh báo.
+Quy tắc này đã được đối chiếu với toàn bộ schema chính thức: **2510/2511** hàm
+dựng khớp CRC32. Ngoại lệ duy nhất là `msg_container`, có định danh do đặc tả
+MTProto ấn định cứng — ứng dụng luôn ưu tiên định danh ghi trong tệp.
 
 Nhờ vậy, khi Telegram nâng layer bạn **không cần biên dịch lại**: chỉ việc đặt tệp
 `api.tl` mới vào thư mục `schema/` cạnh tệp thực thi (hoặc trỏ tới nó bằng
