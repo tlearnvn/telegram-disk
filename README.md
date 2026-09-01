@@ -1,6 +1,6 @@
 # Tuấn's Telegram Disk
 
-> Ổ đĩa lưu trữ không giới hạn dùng Telegram làm nơi chứa dữ liệu.
+> Ổ đĩa lưu trữ "không giới hạn" dùng Telegram làm nơi chứa dữ liệu.
 > Viết hoàn toàn bằng C++17, chạy độc lập, không cần cài thêm gì.
 
 **Thiết kế bởi Tuandethuong.**
