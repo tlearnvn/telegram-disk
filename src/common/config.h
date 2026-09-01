@@ -37,7 +37,6 @@ struct StorageConfig {
     int parallelChunks = 2;
     // Bộ nhớ đệm khối tải xuống.
     uint64_t downloadCacheBytes = 256ull * 1024 * 1024;
-    std::string downloadCacheDirectory = "data/cache";
     // Tự động dọn phiên tải lên bỏ dở sau bao nhiêu giây không hoạt động.
     int uploadIdleTimeoutSeconds = 1800;
     // Số ngày giữ tệp trong thùng rác (0 = giữ mãi).

@@ -291,7 +291,7 @@ Những mục hay dùng nhất:
 | **Cỡ khối trình duyệt gửi** | 8 MB | Mỗi lần trình duyệt gửi lên máy chủ bao nhiêu byte |
 | **Số mảnh song song** | 2 | Bao nhiêu mảnh xử lý cùng lúc (mỗi mảnh một tài khoản) |
 | **Khử trùng lặp** | Bật | Tệp trùng nội dung dùng lại dữ liệu cũ |
-| **Bộ đệm tải xuống** | 256 MB | Đệm khối 1 MB giúp tua video mượt |
+| **Bộ đệm tải xuống** | 256 MB | Đệm khối 1 MB giúp tua video mượt. **Đây cũng chính là mức RAM ứng dụng dùng khi có người tải tệp** — máy ít RAM thì hạ xuống 32–64 MB |
 | **Số ngày giữ thùng rác** | 30 | |
 | **Nơi lưu trữ** | Telegram | Đổi sang *nội bộ* để chạy thử không cần Telegram |
 | **Cơ sở dữ liệu** | SQLite | Hoặc MySQL/MariaDB. Đổi xong phải khởi động lại |

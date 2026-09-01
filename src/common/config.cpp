@@ -72,8 +72,6 @@ bool Config::applyJson(const Json& root, std::string& error) {
                                                          storage.parallelChunks));
         storage.downloadCacheBytes = getSize(j, "download_cache_bytes",
                                              storage.downloadCacheBytes);
-        storage.downloadCacheDirectory =
-            getStr(j, "download_cache_directory", storage.downloadCacheDirectory);
         storage.uploadIdleTimeoutSeconds = static_cast<int>(
             getInt(j, "upload_idle_timeout_seconds", storage.uploadIdleTimeoutSeconds));
         storage.trashRetentionDays =
@@ -217,7 +215,6 @@ Json Config::toJson() const {
     st.set("browser_chunk_size", storage.browserChunkSize);
     st.set("parallel_chunks", static_cast<int64_t>(storage.parallelChunks));
     st.set("download_cache_bytes", storage.downloadCacheBytes);
-    st.set("download_cache_directory", storage.downloadCacheDirectory);
     st.set("upload_idle_timeout_seconds",
            static_cast<int64_t>(storage.uploadIdleTimeoutSeconds));
     st.set("trash_retention_days", static_cast<int64_t>(storage.trashRetentionDays));

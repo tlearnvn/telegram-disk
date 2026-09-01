@@ -256,6 +256,33 @@ trong cùng một vùng phim không phải gọi lại Telegram.
 `FILE_REFERENCE_EXPIRED`, ứng dụng tự gọi `channels.getMessages` lấy tham chiếu
 mới rồi thử lại — người dùng không thấy gì bất thường.
 
+### Tải về tốn bao nhiêu RAM và đĩa?
+
+**Đĩa: không tốn gì.** Dữ liệu đi thẳng từ Telegram ra kết nối của người tải,
+không qua tệp tạm nào. Đã đo: tải một tệp 1,85 GB xong, thư mục spool và cache
+vẫn đúng 0 byte.
+
+**RAM: bằng đúng cỡ bộ đệm, không phụ thuộc kích thước tệp.** Đường đọc chỉ giữ
+một khối 1 MB đang xử lý; phần còn lại là bộ đệm khối LRU dùng chung cho mọi
+lượt tải.
+
+| `download_cache_bytes` | RSS lúc rảnh | RSS khi tải tệp 1,85 GB |
+|---|---|---|
+| 256 MB *(mặc định)* | 9 MB | 265 MB |
+| 32 MB | 9 MB | ~45 MB |
+
+Con số đứng yên dù tải lại bao nhiêu lần, và tải song song nhiều luồng cũng
+không cộng dồn — bộ đệm là dùng chung.
+
+> **Một cái bẫy của glibc.** Ứng dụng cấp phát rồi giải phóng liên tục các khối
+> 1 MB. glibc có "ngưỡng mmap động": lần đầu giải phóng một vùng mmap, nó nâng
+> ngưỡng lên bằng kích thước vùng đó, khiến các khối 1 MB sau này lấy từ heap và
+> **không bao giờ trả lại hệ điều hành**. Đo được: tải cùng một tệp 1,85 GB sáu
+> lần làm RSS leo 268 → 520 → 772 → 1024 MB, dù bộ đệm vẫn báo đúng 255/256 MB.
+> Không phải rò rỉ (nó có chững lại), nhưng lãng phí thật. Ghim ngưỡng bằng
+> `mallopt(M_MMAP_THRESHOLD, …)` lúc khởi động là RSS đứng yên ở 265 MB qua cả
+> tám lần tải.
+
 ---
 
 ## 6. Khử trùng lặp

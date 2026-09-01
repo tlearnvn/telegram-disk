@@ -7,6 +7,10 @@
 #include <cstring>
 #include <string>
 
+#if defined(__GLIBC__)
+#include <malloc.h>
+#endif
+
 #include "app/app.h"
 #include "common/config.h"
 #include "common/fsutil.h"
@@ -144,6 +148,18 @@ int main(int argc, char** argv) {
     // Bảo đảm hiển thị tiếng Việt đúng trên Command Prompt.
     SetConsoleOutputCP(CP_UTF8);
     SetConsoleCP(CP_UTF8);
+#endif
+
+#if defined(__GLIBC__)
+    // Ứng dụng cấp phát/giải phóng liên tục các khối 1 MB khi đọc dữ liệu về.
+    // glibc có "ngưỡng mmap động": lần đầu giải phóng một khối mmap, nó nâng
+    // ngưỡng lên bằng kích thước khối đó, nên các khối 1 MB sau này lấy từ heap
+    // và KHÔNG bao giờ trả lại cho hệ điều hành. Đo thực tế: tải một tệp 1,85 GB
+    // sáu lần làm RSS leo từ 268 MB lên 1024 MB dù bộ đệm vẫn giữ đúng mức 256 MB.
+    // Ghim ngưỡng lại thì các khối 1 MB luôn đi qua mmap và được trả lại ngay —
+    // RSS đứng yên ở 265 MB qua cả sáu lần.
+    mallopt(M_MMAP_THRESHOLD, 256 * 1024);
+    mallopt(M_TRIM_THRESHOLD, 4 * 1024 * 1024);
 #endif
 
     using namespace ttd;

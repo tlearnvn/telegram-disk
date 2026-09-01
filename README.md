@@ -130,7 +130,7 @@ trong giao diện web** (Cài đặt). Vài mục đáng chú ý:
 | `storage.browser_chunk_size` | `8MB` | Mỗi lần trình duyệt gửi lên máy chủ bao nhiêu byte. |
 | `storage.parallel_chunks` | `2` | Số mảnh xử lý song song (mỗi mảnh một tài khoản). |
 | `storage.deduplicate` | `true` | Tệp trùng nội dung sẽ dùng lại dữ liệu cũ, không tốn thêm dung lượng. |
-| `storage.download_cache_bytes` | `256MB` | Bộ nhớ đệm khối 1 MB giúp tua video mượt. |
+| `storage.download_cache_bytes` | `256MB` | Bộ nhớ đệm khối 1 MB giúp tua video mượt. Cũng chính là mức RAM ứng dụng dùng khi có người tải tệp — đo thực tế: 265 MB khi tải tệp 1,85 GB, không phụ thuộc kích thước tệp. |
 | `storage.trash_retention_days` | `30` | Số ngày giữ tệp trong thùng rác. |
 
 **Chọn `buffer_mode` thế nào?**

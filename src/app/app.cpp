@@ -307,7 +307,6 @@ bool App::start(const std::string& configPath, std::string& error) {
 
     ensureDirectoryExists(cfg.resolvePath("data"));
     ensureDirectoryExists(cfg.resolvePath(cfg.storage.spoolDirectory));
-    ensureDirectoryExists(cfg.resolvePath(cfg.storage.downloadCacheDirectory));
 
     // Cho phép phát triển giao diện mà không cần biên dịch lại.
     std::string webDir = cfg.resolvePath("web");
@@ -651,7 +650,6 @@ bool App::applySettings(const Json& settings, std::string& error) {
     Logger::instance().setLevel(parseLogLevel(cfg.logging.level));
     if (engine_) engine_->cache().setCapacity(cfg.storage.downloadCacheBytes);
     ensureDirectoryExists(cfg.resolvePath(cfg.storage.spoolDirectory));
-    ensureDirectoryExists(cfg.resolvePath(cfg.storage.downloadCacheDirectory));
 
     // api_id / api_hash thường được điền sau khi ứng dụng đã chạy. Nếu không
     // đẩy xuống pool ở đây thì mọi tài khoản vẫn gửi api_id cũ (thường là 0)
