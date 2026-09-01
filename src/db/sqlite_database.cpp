@@ -27,7 +27,12 @@ public:
     Stmt& operator=(const Stmt&) = delete;
 
     bool ok() const { return rc_ == SQLITE_OK && stmt_ != nullptr; }
-    std::string error() const { return sqlite3_errmsg(db_); }
+    // sqlite3_errmsg(nullptr) trả về đúng chữ "out of memory", nghe như hết RAM
+    // trong khi thật ra là cơ sở dữ liệu đã đóng. Nói thẳng cho đỡ đánh lạc hướng.
+    std::string error() const {
+        if (!db_) return "cơ sở dữ liệu đã đóng";
+        return sqlite3_errmsg(db_);
+    }
 
     void bindInt(int i, int64_t v) { sqlite3_bind_int64(stmt_, i, v); }
     void bindText(int i, const std::string& v) {

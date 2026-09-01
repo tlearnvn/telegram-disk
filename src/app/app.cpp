@@ -385,6 +385,12 @@ void App::stop() {
     engine_.reset();
     vfs_.reset();
     users_.reset();
+    // Huỷ hẳn nhóm tài khoản TRƯỚC khi đóng cơ sở dữ liệu: hàm huỷ của nó lưu
+    // khoá phiên thêm một lần nữa, mà đóng CSDL trước thì lần lưu đó thất bại
+    // và in ra cảnh báo khó hiểu.
+    backend_ = nullptr;
+    pool_.reset();
+    localBackend_.reset();
     if (db_) db_->close();
     LOG_INFO(kTag, "Đã dừng. Tạm biệt!");
 }

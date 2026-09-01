@@ -751,7 +751,20 @@ void testCoSoDuLieu() {
     kiem(tk2.physicalBytes == 5000000 && tk2.uniqueChunkCount == 1,
          "khử trùng lặp: dung lượng thật không đổi");
 
+    // Ghi sau khi đã đóng phải báo đúng lý do. SQLite trả "out of memory" khi
+    // con trỏ CSDL là null — nghe như hết RAM, rất đánh lạc hướng.
     database->close();
+    db::SessionKeyEntry khoa;
+    khoa.accountId = 1;
+    khoa.dcId = 2;
+    khoa.authKeyHex = std::string(512, 'a');
+    khoa.serverSalt = 12345;
+    std::string loiDong;
+    kiem(!database->saveSessionKey(khoa, loiDong), "ghi vào CSDL đã đóng phải thất bại");
+    kiem(loiDong.find("out of memory") == std::string::npos,
+         "lỗi CSDL đã đóng không nói nhầm là hết bộ nhớ", loiDong);
+    kiem(!loiDong.empty(), "lỗi CSDL đã đóng có nội dung rõ ràng", loiDong);
+
     removeDirectoryRecursive(thuMuc);
 }
 
