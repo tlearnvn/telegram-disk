@@ -45,7 +45,10 @@ public:
                                                     std::string& error) = 0;
 
     // Đọc một đoạn của mảnh. offset chia hết cho 4096, limit tối đa 1 MB.
-    virtual bool readRange(const ChunkLocation& loc, uint64_t offset, uint32_t limit,
+    // `loc` vừa vào vừa ra: nếu phải hỏi lại Telegram để lấy tham chiếu mới
+    // (tham chiếu hết hạn, hoặc phải đổi sang tài khoản khác) thì bản cập nhật
+    // được ghi ngược vào đây để nơi gọi lưu lại, khỏi hỏi lại ở lần đọc sau.
+    virtual bool readRange(ChunkLocation& loc, uint64_t offset, uint32_t limit,
                            Bytes& out, std::string& error) = 0;
 
     // Xoá các mảnh khỏi nơi lưu trữ.

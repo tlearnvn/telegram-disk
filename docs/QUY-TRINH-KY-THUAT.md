@@ -508,10 +508,57 @@ chính nó** để lấy hash đúng, rồi nhớ lại theo `channel_id`. Tài 
 mời vào nhóm sẽ báo rõ lý do thay vì mã lỗi khó hiểu, và nhóm tài khoản sẽ thử
 tài khoản khác thay vì làm hỏng cả phiên.
 
-Cùng một lý do, `access_hash` của **tài liệu** cũng theo từng tài khoản. Khi đọc
-bằng tài khoản khác, tham chiếu cũ có thể không dùng được — đường làm mới
-`file_reference` gọi `channels.getMessages` bằng chính tài khoản đang đọc nên tự
-lấy được bộ giá trị hợp lệ.
+### Một tài khoản bị khoá thì mảnh của nó có mất không?
+
+**Không.** Dữ liệu nằm trong **siêu nhóm**, không nằm "trong" tài khoản nào. Tài
+khoản chỉ là người bấm gửi; gửi xong thì tin nhắn thuộc về nhóm. Tài khoản bị
+Telegram khoá, bị xoá, hay chỉ là bị tắt trong phần cài đặt của ứng dụng — mảnh
+vẫn nằm nguyên đó, và **bất kỳ tài khoản nào còn trong nhóm cũng đọc được**.
+
+Thứ duy nhất mất theo tài khoản là `access_hash` của tài liệu — cùng một lý do
+với `access_hash` của kênh: Telegram cấp riêng cho từng tài khoản. Nhưng nó lấy
+lại được, vì cột **`message_id`** trong bảng `ttd_chunks` mới là cái neo thật.
+Từ `message_id`, `channels.getMessages` trả về `document_id`, `access_hash`,
+`file_reference` và `dc_id` **hợp lệ với chính tài khoản đang hỏi**.
+
+```mermaid
+flowchart TD
+    A["Cần đọc mảnh"] --> B{"Tài khoản đã tải lên<br/>còn dùng được?"}
+    B -- Còn --> C["Đọc thẳng bằng tham chiếu đã lưu"]
+    B -- "Bị khoá / tắt / chưa đăng nhập" --> D["Chọn tài khoản khác còn hoạt động"]
+    D --> E["channels.getMessages theo message_id"]
+    E --> F{"Tin nhắn còn trong nhóm?"}
+    F -- Còn --> G["Nhận access_hash + file_reference<br/>của riêng tài khoản này"]
+    F -- Đã bị xoá khỏi nhóm --> H["Mảnh mất thật — báo lỗi rõ ràng"]
+    G --> I["Đọc thành công"]
+    C --> J{"Đọc được?"}
+    J -- Được --> I
+    J -- Không --> E
+    I --> K["Ghi lại access_hash + account_id mới<br/>vào ttd_chunks"]
+    K --> L["Lần đọc sau khỏi phải hỏi lại"]
+```
+
+Ba tầng dự phòng trong `AccountPool::readRange`:
+
+1. Nếu tài khoản đọc **không phải** tài khoản đã tải lên, hỏi lại tham chiếu
+   **trước khi** thử — dùng lại hash của người khác thì chắc chắn bị từ chối.
+2. Hỏng vì **bất kỳ** lý do gì cũng hỏi lại tham chiếu đúng một lần rồi đọc lại.
+3. Vẫn hỏng thì lần lượt thử mọi tài khoản còn lại, mỗi tài khoản tự hỏi lại
+   tham chiếu của riêng nó.
+
+> **Đã từng sai ở đây.** Bản trước chỉ hỏi lại khi thông báo lỗi có chuỗi
+> `FILE_REFERENCE`. Lỗi do `access_hash` của tài khoản khác lại không mang chuỗi
+> đó, nên bước 2 bị bỏ qua; khi trong nhóm chỉ còn **đúng một** tài khoản thì
+> bước 3 cũng rỗng và mảnh coi như đọc không được — dù chỉ cần hỏi lại một câu
+> là xong. Ngoài ra `readRange` nhận `loc` là `const`, nên tham chiếu mới không
+> bao giờ được ghi ngược lại cơ sở dữ liệu: khối `updateChunkReference` trong
+> `storage_engine.cpp` là mã chết, và mỗi khối 1 MB trượt bộ đệm đều phải hỏi
+> lại Telegram một lần nữa. Cả hai đã sửa, kèm phép tự kiểm tra chạy đúng kịch
+> bản "tài khoản cũ bị khoá, tài khoản khác đọc thay".
+
+Điều kiện duy nhất để mảnh mất thật: **tin nhắn bị xoá khỏi siêu nhóm**. Nên
+đừng dọn lịch sử nhóm, và nếu đá một tài khoản ra khỏi nhóm thì nhớ **không**
+chọn "xoá toàn bộ tin nhắn của thành viên này" — đó mới là thao tác xoá dữ liệu.
 
 ---
 
@@ -613,7 +660,7 @@ Hai chi tiết nhỏ nhưng dễ sai, đã xử lý:
 
 ### Tự kiểm tra
 
-`./build/ttd_selftest` — **215 phép kiểm tra**, chạy tự động mỗi lần đóng gói;
+`./build/ttd_selftest` — **246 phép kiểm tra**, chạy tự động mỗi lần đóng gói;
 thất bại là dừng build. Bao gồm các vector chuẩn của FIPS/RFC cho hàm băm, HMAC,
 PBKDF2, AES; số học số lớn và RSA; quy tắc CRC32 của TL; phân tích `pq`; phân
 tích HTTP; ánh xạ Range; CSDL với tên tiếng Việt; và kế toán khử trùng lặp.

@@ -182,7 +182,8 @@ public:
                             std::string& error) = 0;
     virtual bool deleteChunks(int64_t fileId, std::string& error) = 0;
     virtual bool updateChunkReference(int64_t chunkId, const std::string& fileReferenceHex,
-                                      int64_t accessHash, int dcId, std::string& error) = 0;
+                                      int64_t accessHash, int dcId, int accountId,
+                                      std::string& error) = 0;
     // Đếm số tệp còn tham chiếu tới cùng nội dung (khử trùng lặp).
     virtual bool countFilesWithHash(const std::string& sha256, uint64_t& out,
                                     std::string& error) = 0;

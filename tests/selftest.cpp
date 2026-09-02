@@ -25,6 +25,8 @@
 #include "http/assets.h"
 #include "http/mime.h"
 #include "storage/download_stream.h"
+#include "storage/storage_engine.h"
+#include "tg/storage_backend.h"
 #include "tg/mtproto_crypto.h"
 #include "tg/tl_codec.h"
 #include "tg/account_pool.h"
@@ -691,6 +693,24 @@ void testCoSoDuLieu() {
     kiem(dsMang[0].accessHash == -998877, "access_hash âm giữ nguyên");
     kiemBang(dsMang[0].fileReferenceHex, "aabbccdd", "file_reference giữ nguyên");
 
+    // Khi tài khoản đã tải lên không còn dùng được (bị Telegram khoá chẳng
+    // hạn), tài khoản khác hỏi lại Telegram theo message_id và nhận về
+    // access_hash của RIÊNG nó. Ghi lại thì phải ghi kèm account_id, không thì
+    // lần đọc sau lại đưa hash của người này cho người kia dùng.
+    kiem(database->updateChunkReference(dsMang[0].id, "11223344", 555000111, 5, 7, loi),
+         "ghi lại tham chiếu mảnh sau khi đổi tài khoản", loi);
+    dsMang.clear();
+    kiem(database->listChunks(tep.id, dsMang, loi) && dsMang.size() == 1, "đọc lại mảnh");
+    kiemBang(dsMang[0].fileReferenceHex, "11223344", "file_reference mới được lưu");
+    kiem(dsMang[0].accessHash == 555000111, "access_hash mới được lưu");
+    kiem(dsMang[0].dcId == 5, "dc_id mới được lưu");
+    kiem(dsMang[0].accountId == 7, "account_id đi kèm access_hash mới");
+    kiem(dsMang[0].messageId == 999 && dsMang[0].documentId == 12345,
+         "message_id và document_id không đổi khi làm mới tham chiếu");
+    // Trả lại như cũ cho các phép kiểm sau.
+    kiem(database->updateChunkReference(dsMang[0].id, "aabbccdd", -998877, 2, 1, loi),
+         "khôi phục tham chiếu mảnh", loi);
+
     db::ListOptions opts;
     opts.parentId = thuMucGoc.id;
     std::vector<db::FileEntry> ds;
@@ -765,6 +785,116 @@ void testCoSoDuLieu() {
          "lỗi CSDL đã đóng không nói nhầm là hết bộ nhớ", loiDong);
     kiem(!loiDong.empty(), "lỗi CSDL đã đóng có nội dung rõ ràng", loiDong);
 
+    removeDirectoryRecursive(thuMuc);
+}
+
+// ---------------------------------------------------------------------------
+// Nơi lưu trữ giả lập đúng kịch bản "tài khoản đã tải lên bị Telegram khoá":
+// mỗi lần đọc nó hỏi lại theo message_id và trả về access_hash + tài khoản MỚI
+// qua tham số `loc` (vừa vào vừa ra).
+class BackendDoiTaiKhoan : public tg::StorageBackend {
+public:
+    Bytes noiDung;
+    int soLanDoc = 0;
+    int64_t hashMoi = 0;
+    int taiKhoanMoi = 0;
+
+    std::string name() const override { return "giả lập"; }
+    bool ready(std::string&) const override { return true; }
+    std::unique_ptr<tg::ChunkWriter> beginChunk(uint64_t, const std::string&,
+                                                std::string& error) override {
+        error = "bản giả lập không ghi";
+        return nullptr;
+    }
+    bool readRange(tg::ChunkLocation& loc, uint64_t offset, uint32_t limit, Bytes& out,
+                   std::string& error) override {
+        soLanDoc++;
+        if (offset >= noiDung.size()) {
+            error = "vượt quá cuối mảnh";
+            return false;
+        }
+        size_t lay = std::min<size_t>(limit, noiDung.size() - static_cast<size_t>(offset));
+        out.assign(noiDung.begin() + static_cast<long>(offset),
+                   noiDung.begin() + static_cast<long>(offset) + static_cast<long>(lay));
+        if (hashMoi != 0) {
+            loc.accessHash = hashMoi;
+            loc.accountId = taiKhoanMoi;
+            loc.fileReference = Bytes{0xde, 0xad, 0xbe, 0xef};
+        }
+        return true;
+    }
+    bool removeChunks(const std::vector<tg::ChunkLocation>&, std::string&) override {
+        return true;
+    }
+    tg::BackendStats stats() const override { return tg::BackendStats(); }
+};
+
+void testDoiTaiKhoanKhiDoc() {
+    nhom("Đọc bằng tài khoản khác khi tài khoản cũ bị khoá");
+
+    std::string thuMuc = "ttd_test_doi_tk";
+    removeDirectoryRecursive(thuMuc);
+    ensureDirectoryExists(thuMuc);
+    std::string loi;
+    db::DatabaseConfig cfg;
+    cfg.kind = "sqlite";
+    cfg.sqlitePath = joinPath(thuMuc, "test.db");
+    auto database = db::createDatabase(cfg, loi);
+    kiem(database != nullptr, "tạo được CSDL tạm", loi);
+    if (!database) return;
+    kiem(database->open(loi), "mở CSDL tạm", loi);
+    kiem(database->migrate(loi), "tạo lược đồ", loi);
+
+    db::FileEntry tep;
+    tep.name = "phim.mkv";
+    tep.path = "/phim.mkv";
+    tep.parentId = 0;
+    tep.isFolder = false;
+    tep.size = 64;
+    tep.ownerId = 1;
+    kiem(database->createEntry(tep, loi), "tạo tệp thử", loi);
+
+    db::ChunkEntry mang;
+    mang.fileId = tep.id;
+    mang.index = 0;
+    mang.offset = 0;
+    mang.size = 64;
+    mang.messageId = 4242;
+    mang.documentId = 777;
+    mang.accessHash = 111111;      // access_hash của tài khoản #1 (sắp bị khoá)
+    mang.fileReferenceHex = "00112233";
+    mang.dcId = 2;
+    mang.accountId = 1;
+    kiem(database->addChunk(mang, loi), "ghi mảnh của tài khoản #1", loi);
+
+    BackendDoiTaiKhoan backend;
+    backend.noiDung.assign(64, 0x5a);
+    backend.hashMoi = 999999;      // access_hash mà tài khoản #2 hỏi lại được
+    backend.taiKhoanMoi = 2;
+
+    storage::StorageEngine engine(*database, backend, Config::instance());
+    Bytes ra;
+    kiem(engine.readFileRange(tep, 0, 64, ra, loi) == 64, "đọc đủ 64 byte qua tài khoản khác",
+         loi);
+    kiem(ra.size() == 64 && ra[0] == 0x5a && ra[63] == 0x5a, "nội dung đọc về đúng");
+
+    // Đây mới là điều cần chứng minh: tham chiếu mới phải được ghi lại, kèm
+    // account_id của tài khoản đã lấy nó. Trước đây readRange nhận `loc` là
+    // const nên khối ghi lại này không bao giờ chạy.
+    std::vector<db::ChunkEntry> dsMang;
+    kiem(database->listChunks(tep.id, dsMang, loi) && dsMang.size() == 1, "đọc lại mảnh", loi);
+    kiem(dsMang[0].accessHash == 999999, "access_hash mới đã được lưu");
+    kiem(dsMang[0].accountId == 2, "account_id mới đã được lưu");
+    kiemBang(dsMang[0].fileReferenceHex, "deadbeef", "file_reference mới đã được lưu");
+    kiem(dsMang[0].messageId == 4242, "message_id giữ nguyên — đây là neo để hỏi lại");
+
+    // Lần đọc sau lấy từ bộ đệm khối, không gọi lại nơi lưu trữ.
+    int truoc = backend.soLanDoc;
+    Bytes ra2;
+    kiem(engine.readFileRange(tep, 0, 64, ra2, loi) == 64, "đọc lần hai", loi);
+    kiem(backend.soLanDoc == truoc, "lần đọc sau dùng bộ đệm, không hỏi lại");
+
+    database->close();
     removeDirectoryRecursive(thuMuc);
 }
 
@@ -921,6 +1051,7 @@ int main() {
     testHttp();
     testMysqlThoat();
     testCoSoDuLieu();
+    testDoiTaiKhoanKhiDoc();
     testCauHinh();
     testInitConnection();
     testPhienBan();

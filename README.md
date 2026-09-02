@@ -220,7 +220,7 @@ Script tự kiểm tra tệp `.exe` chỉ phụ thuộc DLL có sẵn trong Wind
 ./build/ttd_selftest
 ```
 
-Gần 200 phép kiểm tra: mật mã (đối chiếu vector chuẩn FIPS/RFC), số nguyên lớn,
+**246 phép kiểm tra**: mật mã (đối chiếu vector chuẩn FIPS/RFC), số nguyên lớn,
 schema TL, MTProto, HTTP, WebDAV Range, cơ sở dữ liệu, cấu hình.
 
 ### Đánh số phiên bản

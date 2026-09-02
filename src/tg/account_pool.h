@@ -68,7 +68,7 @@ public:
     bool ready(std::string& why) const override;
     std::unique_ptr<ChunkWriter> beginChunk(uint64_t totalSize, const std::string& chunkName,
                                             std::string& error) override;
-    bool readRange(const ChunkLocation& loc, uint64_t offset, uint32_t limit, Bytes& out,
+    bool readRange(ChunkLocation& loc, uint64_t offset, uint32_t limit, Bytes& out,
                    std::string& error) override;
     bool removeChunks(const std::vector<ChunkLocation>& locations, std::string& error) override;
     BackendStats stats() const override;

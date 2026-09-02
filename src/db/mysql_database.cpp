@@ -442,10 +442,15 @@ bool MysqlDatabase::deleteChunks(int64_t fileId, std::string& error) {
 }
 
 bool MysqlDatabase::updateChunkReference(int64_t chunkId, const std::string& fileReferenceHex,
-                                         int64_t accessHash, int dcId, std::string& error) {
+                                         int64_t accessHash, int dcId, int accountId,
+                                         std::string& error) {
+    // access_hash lưu ở đây là của riêng tài khoản đã lấy nó, nên account_id
+    // phải đi cùng — nếu không, lần đọc sau sẽ đưa hash của người này cho
+    // người khác dùng và bị Telegram từ chối.
     return run("UPDATE ttd_chunks SET file_reference=" + Q(fileReferenceHex) +
                    ", access_hash=" + N(accessHash) + ", dc_id=" +
-                   N(static_cast<int64_t>(dcId)) + " WHERE id=" + N(chunkId),
+                   N(static_cast<int64_t>(dcId)) + ", account_id=" +
+                   N(static_cast<int64_t>(accountId)) + " WHERE id=" + N(chunkId),
                error)
         .ok;
 }

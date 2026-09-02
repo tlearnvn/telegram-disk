@@ -94,12 +94,17 @@ bool StorageEngine::streamFileRange(const db::FileEntry& file, uint64_t offset, 
                 error = "Máy chủ trả về khối rỗng tại vị trí " + std::to_string(pos);
                 return false;
             }
-            // Ghi lại tham chiếu mới nếu nơi lưu đã làm mới nó.
-            if (loc.accessHash != chunk->accessHash ||
+            // Ghi lại tham chiếu mới nếu nơi lưu đã làm mới nó (tham chiếu hết
+            // hạn, hoặc phải đổi sang tài khoản khác vì tài khoản cũ không còn
+            // dùng được). Nhờ vậy những lần đọc sau khỏi hỏi lại Telegram.
+            if (loc.accessHash != chunk->accessHash || loc.accountId != chunk->accountId ||
                 toHex(loc.fileReference) != chunk->fileReferenceHex) {
                 std::string updateError;
-                db_.updateChunkReference(chunk->id, toHex(loc.fileReference), loc.accessHash,
-                                         loc.dcId, updateError);
+                if (!db_.updateChunkReference(chunk->id, toHex(loc.fileReference), loc.accessHash,
+                                              loc.dcId, loc.accountId, updateError)) {
+                    LOG_WARN(kTag, "Không lưu được tham chiếu mới cho mảnh %lld: %s",
+                             static_cast<long long>(chunk->id), updateError.c_str());
+                }
             }
             cache_.put(chunk->documentId, blockStart, block);
         }

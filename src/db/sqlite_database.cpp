@@ -630,10 +630,15 @@ bool SqliteDatabase::deleteChunks(int64_t fileId, std::string& error) {
 }
 
 bool SqliteDatabase::updateChunkReference(int64_t chunkId, const std::string& fileReferenceHex,
-                                          int64_t accessHash, int dcId, std::string& error) {
+                                          int64_t accessHash, int dcId, int accountId,
+                                          std::string& error) {
     std::lock_guard<std::mutex> lk(mu_);
+    // access_hash lưu ở đây là của riêng tài khoản đã lấy nó, nên account_id
+    // phải đi cùng — nếu không, lần đọc sau sẽ đưa hash của người này cho
+    // người khác dùng và bị Telegram từ chối.
     Stmt st(db_,
-            "UPDATE ttd_chunks SET file_reference=?, access_hash=?, dc_id=? WHERE id=?");
+            "UPDATE ttd_chunks SET file_reference=?, access_hash=?, dc_id=?, account_id=? "
+            "WHERE id=?");
     if (!st.ok()) {
         error = st.error();
         return false;
@@ -641,7 +646,8 @@ bool SqliteDatabase::updateChunkReference(int64_t chunkId, const std::string& fi
     st.bindText(1, fileReferenceHex);
     st.bindInt(2, accessHash);
     st.bindInt(3, dcId);
-    st.bindInt(4, chunkId);
+    st.bindInt(4, accountId);
+    st.bindInt(5, chunkId);
     st.step();
     return st.done();
 }

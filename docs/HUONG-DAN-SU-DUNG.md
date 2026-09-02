@@ -387,6 +387,30 @@ vào siêu nhóm ở bước 2, rồi bấm **Kết nối lại tất cả**. �
 tài khoản này và dùng tài khoản khác trong lúc chờ, nên việc tải lên không bị
 gián đoạn.
 
+### Một tài khoản bị Telegram khoá — tệp có mất không?
+
+**Không mất.** Tệp nằm trong **siêu nhóm**, không nằm trong tài khoản. Tài khoản
+chỉ là người bấm gửi; gửi xong thì tin nhắn thuộc về nhóm. Tài khoản bị khoá, bị
+xoá, hay bị bạn tắt trong trang **Cài đặt** — mảnh vẫn nằm nguyên, và tài khoản
+nào còn trong nhóm cũng đọc được.
+
+Ứng dụng tự lo phần còn lại: nó lưu số hiệu tin nhắn của từng mảnh, nên tài
+khoản thay thế chỉ việc hỏi lại Telegram theo số hiệu đó để lấy quyền đọc của
+riêng mình. Bạn không phải làm gì cả — chỉ cần **trong nhóm còn ít nhất một tài
+khoản đang hoạt động**.
+
+Việc nên làm khi một tài khoản bị khoá:
+
+1. Vào **Cài đặt → Tài khoản Telegram**, tắt tài khoản đó đi (khỏi phải chờ nó
+   báo lỗi mỗi lần dùng).
+2. Thêm một tài khoản khác và **mời nó vào đúng siêu nhóm** đó.
+3. Xong. Không cần tải lại tệp nào.
+
+> ⚠️ **Chỗ duy nhất làm mất dữ liệu thật: xoá tin nhắn khỏi nhóm.** Khi đá một
+> tài khoản ra khỏi siêu nhóm, Telegram có hỏi thêm *"xoá toàn bộ tin nhắn của
+> thành viên này?"* — **đừng chọn**. Chọn là mất sạch mảnh do tài khoản đó tải
+> lên, và không có cách nào lấy lại. Cũng đừng dùng chức năng xoá lịch sử nhóm.
+
 ### `version 'GLIBC_2.38' not found` khi chạy trên máy chủ
 
 Tệp thực thi được build trên máy có glibc mới hơn máy chủ. Bản phát hành từ

@@ -118,7 +118,7 @@ std::unique_ptr<ChunkWriter> LocalBackend::beginChunk(uint64_t totalSize,
     return writer;
 }
 
-bool LocalBackend::readRange(const ChunkLocation& loc, uint64_t offset, uint32_t limit,
+bool LocalBackend::readRange(ChunkLocation& loc, uint64_t offset, uint32_t limit,
                              Bytes& out, std::string& error) {
     std::string path = pathFor(loc.documentId);
     FILE* f = fsutilOpen(path, "rb");

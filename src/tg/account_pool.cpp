@@ -351,21 +351,48 @@ std::unique_ptr<ChunkWriter> AccountPool::beginChunk(uint64_t totalSize,
     return nullptr;
 }
 
-bool AccountPool::readRange(const ChunkLocation& loc, uint64_t offset, uint32_t limit,
+bool AccountPool::readRange(ChunkLocation& loc, uint64_t offset, uint32_t limit,
                             Bytes& out, std::string& error) {
     TgAccount* account = pickForRead(loc, error);
     if (!account) return false;
 
+    const SupergroupRef group = supergroup();
     ChunkLocation working = loc;
-    if (account->downloadRange(working, offset, limit, out, error)) return true;
 
-    // Tham chiếu tệp có hạn dùng — thử làm mới rồi đọc lại.
-    if (error.find("FILE_REFERENCE") != std::string::npos) {
-        SupergroupRef group = supergroup();
+    // Dữ liệu nằm trong siêu nhóm chứ không nằm "trong" tài khoản nào, nên tài
+    // khoản nào còn trong nhóm cũng đọc được. Nhưng access_hash của tài liệu do
+    // Telegram cấp RIÊNG cho từng tài khoản, y như access_hash của kênh: tài
+    // khoản thay thế phải hỏi lại Telegram theo message_id trước, dùng lại
+    // access_hash của người đã tải lên thì bị từ chối ngay.
+    if (account->id() != working.accountId && group.valid()) {
         std::string refreshError;
-        if (group.valid() && account->refreshFileReference(group, working, refreshError)) {
+        if (account->refreshFileReference(group, working, refreshError)) {
+            working.accountId = account->id();
+            LOG_INFO(kTag, "Mảnh do tài khoản #%d tải lên nay đọc bằng %s — đã hỏi lại tham chiếu",
+                     loc.accountId, account->label().c_str());
+        } else if (!refreshError.empty()) {
+            LOG_WARN(kTag, "Không hỏi lại được tham chiếu bằng %s: %s", account->label().c_str(),
+                     refreshError.c_str());
+        }
+    }
+
+    if (account->downloadRange(working, offset, limit, out, error)) {
+        loc = working;
+        return true;
+    }
+
+    // Hỏng vì lý do gì cũng thử hỏi lại tham chiếu đúng một lần rồi đọc lại:
+    // tham chiếu tệp thì có hạn dùng, còn access_hash thì có thể đang là của
+    // tài khoản khác. Chỉ bắt riêng lỗi FILE_REFERENCE là bỏ sót trường hợp
+    // sau — và khi trong nhóm chỉ còn đúng một tài khoản thì không còn ai khác
+    // để thử tiếp.
+    if (group.valid()) {
+        std::string refreshError;
+        if (account->refreshFileReference(group, working, refreshError)) {
+            working.accountId = account->id();
             if (account->downloadRange(working, offset, limit, out, error)) {
                 LOG_DEBUG(kTag, "Đã làm mới tham chiếu và đọc lại thành công");
+                loc = working;
                 return true;
             }
         } else if (!refreshError.empty()) {
@@ -388,13 +415,15 @@ bool AccountPool::readRange(const ChunkLocation& loc, uint64_t offset, uint32_t 
     for (TgAccount* a : others) {
         ChunkLocation alt = loc;
         std::string err2;
-        SupergroupRef group = supergroup();
-        if (group.valid()) a->refreshFileReference(group, alt, err2);
+        if (group.valid() && a->refreshFileReference(group, alt, err2)) alt.accountId = a->id();
         if (a->downloadRange(alt, offset, limit, out, err2)) {
-            LOG_DEBUG(kTag, "Đọc lại bằng tài khoản %s thành công", a->label().c_str());
+            LOG_INFO(kTag, "Đọc lại bằng tài khoản %s thành công", a->label().c_str());
+            loc = alt;
             return true;
         }
     }
+    if (!others.empty())
+        error += " | Đã thử thêm " + std::to_string(others.size()) + " tài khoản khác";
     return false;
 }
 

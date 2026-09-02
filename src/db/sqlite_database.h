@@ -49,7 +49,8 @@ public:
     bool listChunks(int64_t fileId, std::vector<ChunkEntry>& out, std::string& error) override;
     bool deleteChunks(int64_t fileId, std::string& error) override;
     bool updateChunkReference(int64_t chunkId, const std::string& fileReferenceHex,
-                              int64_t accessHash, int dcId, std::string& error) override;
+                              int64_t accessHash, int dcId, int accountId,
+                              std::string& error) override;
     bool countFilesWithHash(const std::string& sha256, uint64_t& out,
                             std::string& error) override;
 
