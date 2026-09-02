@@ -1,0 +1,51 @@
+# =============================================================================
+#  Xoá một nhánh trên máy chủ.
+#
+#  Vì sao cần: thông tin đăng nhập git của môi trường dựng chỉ được phép tạo và
+#  cập nhật ref, xoá thì bị GitHub trả 403. Runner của Actions có quyền đó, nên
+#  việc dọn nhánh giao cho nó thay vì phải bấm tay trong trang Branches.
+#
+#  Dùng: tab Actions → Dọn nhánh → Run workflow → gõ tên nhánh.
+#  Nhánh mặc định của kho được từ chối thẳng — muốn xoá thì đổi nhánh mặc định
+#  sang nhánh khác trước đã.
+#
+#  Thiết kế bởi Tuandethuong.
+# =============================================================================
+name: Dọn nhánh
+
+on:
+  workflow_dispatch:
+    inputs:
+      nhanh:
+        description: 'Tên nhánh cần xoá (ví dụ: thu-xoa)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  xoa:
+    name: Xoá nhánh
+    runs-on: ubuntu-latest
+    steps:
+      - name: Xoá nhánh đã chỉ định
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NHANH: ${{ inputs.nhanh }}
+        run: |
+          set -euo pipefail
+          MAC_DINH="$(gh api "repos/${{ github.repository }}" --jq .default_branch)"
+          echo "Nhánh mặc định hiện tại: $MAC_DINH"
+
+          if [ "$NHANH" = "$MAC_DINH" ]; then
+            echo "::error::'$NHANH' đang là nhánh mặc định — hãy đổi nhánh mặc định trước."
+            exit 1
+          fi
+          if ! gh api "repos/${{ github.repository }}/branches/$NHANH" >/dev/null 2>&1; then
+            echo "Không có nhánh '$NHANH' — chẳng có gì để dọn."
+            exit 0
+          fi
+
+          gh api -X DELETE "repos/${{ github.repository }}/git/refs/heads/$NHANH"
+          echo "Đã xoá nhánh '$NHANH'." >> "$GITHUB_STEP_SUMMARY"
