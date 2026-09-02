@@ -1,0 +1,141 @@
+# =============================================================================
+#  Dựng bản chạy độc lập rồi đăng lên GitHub Releases.
+#
+#  Chạy khi:
+#    * đẩy một thẻ dạng v1.0.0  →  tạo release mang đúng tên thẻ đó
+#    * bấm tay ở tab Actions    →  tự đặt tên thẻ theo VERSION + số build
+#
+#  Cố ý gọi thẳng build-linux.sh và build-windows.sh — đúng hai script dùng ở
+#  máy nhà — để bản phát hành không bao giờ lệch với bản dựng tay. Hai script
+#  đó đã tự chạy bộ tự kiểm tra và tự chặn nếu tệp còn phụ thuộc thư viện
+#  ngoài, nên workflow này không phải kiểm lại.
+#
+#  Thiết kế bởi Tuandethuong.
+# =============================================================================
+name: Phát hành
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tên thẻ phát hành (bỏ trống = tự đặt theo VERSION và số build)'
+        required: false
+        type: string
+      draft:
+        description: 'Tạo bản nháp để xem lại trước khi công bố'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write        # cần để tạo thẻ và bản phát hành
+
+jobs:
+  phat-hanh:
+    name: Dựng Linux + Windows rồi phát hành
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Lấy mã nguồn
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0      # cần lịch sử để ghi mã commit vào thông tin phiên bản
+
+      - name: Cài công cụ biên dịch
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake mingw-w64 zip binutils
+
+      - name: Xác định tên thẻ
+        id: ver
+        run: |
+          PHIEN_BAN="$(cat VERSION)"
+          SO_BUILD="$(cat BUILD_NUMBER 2>/dev/null || echo 0)"
+          if [ "${{ github.event_name }}" = "push" ]; then
+            THE="${GITHUB_REF#refs/tags/}"
+          elif [ -n "${{ inputs.tag }}" ]; then
+            THE="${{ inputs.tag }}"
+          else
+            THE="v${PHIEN_BAN}-build${SO_BUILD}"
+          fi
+          echo "phien_ban=$PHIEN_BAN" >> "$GITHUB_OUTPUT"
+          echo "the=$THE"             >> "$GITHUB_OUTPUT"
+          echo "Sẽ phát hành **$THE** (phiên bản $PHIEN_BAN, build $SO_BUILD)" \
+            >> "$GITHUB_STEP_SUMMARY"
+
+      # TTD_AUTO_BUMP=OFF: số build thuộc về kho mã, tăng ở đây chỉ làm bẩn cây
+      # mã bằng một thay đổi không ai commit.
+      - name: Dựng bản Linux amd64 (liên kết tĩnh, có tự kiểm tra)
+        env:
+          TTD_AUTO_BUMP: 'OFF'
+          TTD_FULLY_STATIC: '1'
+        run: ./build-linux.sh
+
+      - name: Dựng bản Windows x64
+        env:
+          TTD_AUTO_BUMP: 'OFF'
+        run: ./build-windows.sh
+
+      - name: Tính tổng kiểm SHA-256
+        run: |
+          cd dist
+          sha256sum ./*.tar.gz ./*.zip | sed 's| \./| |' > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Soạn nội dung bản phát hành
+        env:
+          KHO: ${{ github.server_url }}/${{ github.repository }}
+        run: |
+          {
+            echo "Ổ đĩa lưu trữ không giới hạn trên nền Telegram, viết bằng C++17."
+            echo "Mỗi gói là **một tệp thực thi duy nhất** — không cần cài gì thêm."
+            echo
+            echo '## Tải về'
+            echo
+            echo '| Hệ điều hành | Gói | Cách chạy |'
+            echo '|---|---|---|'
+            echo '| Debian · Ubuntu · VPS (amd64) | `…-linux-amd64.tar.gz` | Giải nén rồi `./chay.sh` |'
+            echo '| Windows 10/11 64-bit | `…-windows-x64.zip` | Giải nén rồi bấm đúp `chay.bat` |'
+            echo
+            echo 'Mở trình duyệt tới <http://127.0.0.1:8088>. Lần chạy đầu tiên, mật khẩu'
+            echo 'quản trị được in ra màn hình — nhớ chép lại.'
+            echo
+            echo 'Bản Linux **liên kết tĩnh hoàn toàn**, không phụ thuộc glibc của máy đích'
+            echo 'nên chạy được cả trên máy chủ cũ (`ldd` sẽ in "not a dynamic executable").'
+            echo 'Bản Windows chỉ dùng DLL có sẵn trong hệ điều hành.'
+            echo
+            echo '## Tài liệu'
+            echo
+            echo "* [Hướng dẫn sử dụng]($KHO/blob/${{ github.sha }}/docs/HUONG-DAN-SU-DUNG.md)"
+            echo "* [Quy trình kỹ thuật]($KHO/blob/${{ github.sha }}/docs/QUY-TRINH-KY-THUAT.md)"
+            echo
+            echo '## Tổng kiểm SHA-256'
+            echo
+            echo '| Tệp | SHA-256 |'
+            echo '|---|---|'
+            while read -r bam ten; do echo "| \`$ten\` | \`$bam\` |"; done < dist/SHA256SUMS.txt
+            echo
+            echo "Bản này do GitHub Actions dựng từ commit \`${{ github.sha }}\` trên máy sạch,"
+            echo 'đã chạy qua toàn bộ bộ tự kiểm tra — ai cũng dựng lại được từ mã nguồn.'
+            echo
+            echo '---'
+            echo 'Thiết kế bởi Tuandethuong.'
+          } > NOTE.md
+          cat NOTE.md
+
+      - name: Tạo bản phát hành và đính kèm gói
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NHAP: ${{ inputs.draft == true && '--draft' || '' }}
+        run: |
+          gh release create "${{ steps.ver.outputs.the }}" \
+            --title "Tuấn's Telegram Disk ${{ steps.ver.outputs.the }}" \
+            --notes-file NOTE.md \
+            --target "${{ github.sha }}" \
+            $NHAP \
+            dist/*.tar.gz dist/*.zip dist/SHA256SUMS.txt
+          echo "Đã phát hành: ${{ github.server_url }}/${{ github.repository }}/releases/tag/${{ steps.ver.outputs.the }}" \
+            >> "$GITHUB_STEP_SUMMARY"

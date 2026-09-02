@@ -34,6 +34,11 @@ dữ liệu, MTProto, kèm sơ đồ.
 
 ## Cài đặt nhanh
 
+Tải gói dựng sẵn ở trang **[Releases](../../releases)** — mỗi bản phát hành có
+sẵn tổng kiểm SHA-256 để đối chiếu, và do GitHub Actions dựng từ mã nguồn trên
+máy sạch (xem [`.github/workflows/phat-hanh.yml`](.github/workflows/phat-hanh.yml)),
+nên ai cũng dựng lại được y hệt.
+
 ### Windows 64-bit
 
 1. Tải gói `tuan-telegram-disk-x.y.z-windows-x64.zip`, giải nén ra một thư mục cố định.
@@ -213,6 +218,19 @@ sudo apt install mingw-w64 cmake
 
 Script tự kiểm tra tệp `.exe` chỉ phụ thuộc DLL có sẵn trong Windows
 (`kernel32`, `msvcrt`, `ws2_32`, `iphlpapi`, `bcrypt`) — không cần cài runtime nào.
+
+### Phát hành lên Releases
+
+Đẩy một thẻ là GitHub tự dựng cả hai gói rồi đăng lên Releases kèm tổng kiểm:
+
+```bash
+git tag v1.0.0 && git push origin v1.0.0
+```
+
+Hoặc vào tab **Actions → Phát hành → Run workflow** để bấm tay (bỏ trống ô thẻ
+thì nó tự đặt tên theo `VERSION` và số build). Workflow gọi đúng hai script
+`build-linux.sh` và `build-windows.sh` ở trên, nên bản phát hành không bao giờ
+lệch với bản dựng tay.
 
 ### Chạy bộ tự kiểm tra
 

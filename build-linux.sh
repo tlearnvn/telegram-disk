@@ -14,6 +14,9 @@ SO_LUONG="${TTD_JOBS:-$(nproc 2>/dev/null || echo 4)}"
 # glibc mới sẽ không chạy được trên máy chủ glibc cũ hơn ('GLIBC_2.38 not
 # found'). Đặt TTD_FULLY_STATIC=0 nếu cố tình muốn liên kết động.
 HOAN_TOAN_TINH="${TTD_FULLY_STATIC:-1}"
+# Số build là của kho mã, không phải của máy dựng. Máy chạy CI đặt
+# TTD_AUTO_BUMP=OFF để khỏi làm bẩn cây mã bằng một lần tăng chẳng ai đọc.
+TU_TANG="${TTD_AUTO_BUMP:-ON}"
 
 mau()   { printf '\033[%sm%s\033[0m\n' "$1" "$2"; }
 buoc()  { mau '1;36' "▸ $*"; }
@@ -34,6 +37,7 @@ cmake -S "$GOC" -B "$THU_MUC_BUILD" \
       -DCMAKE_BUILD_TYPE="$KIEU" \
       -DTTD_STATIC=ON \
       -DTTD_FULLY_STATIC="$( [ "$HOAN_TOAN_TINH" = "1" ] && echo ON || echo OFF )" \
+      -DTTD_AUTO_BUMP="$TU_TANG" \
       -DTTD_BUILD_TESTS=ON
 
 buoc "Biên dịch với $SO_LUONG luồng"
