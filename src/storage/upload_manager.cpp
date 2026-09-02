@@ -58,6 +58,31 @@ const char* uploadStateNameVi(UploadState s) {
     }
 }
 
+bool laLoiTamThoi(const std::string& error, int& giayOut) {
+    giayOut = 0;
+    static const char* kDinhDanh[] = {"FLOOD_PREMIUM_WAIT_", "FLOOD_WAIT_", "SLOWMODE_WAIT_",
+                                      "TAKEOUT_INIT_DELAY_", "FLOOD_PREMIUM_WAIT",
+                                      "FLOOD_WAIT"};
+    for (const char* d : kDinhDanh) {
+        size_t p = error.find(d);
+        if (p == std::string::npos) continue;
+        // Đọc số ngay sau định danh, nếu có.
+        size_t i = p + std::strlen(d);
+        while (i < error.size() && (error[i] == '_' || error[i] == ' ')) ++i;
+        int n = 0;
+        bool coSo = false;
+        while (i < error.size() && error[i] >= '0' && error[i] <= '9') {
+            n = n * 10 + (error[i] - '0');
+            ++i;
+            coSo = true;
+            if (n > 86400) break;   // vô lý thì thôi
+        }
+        if (coSo) giayOut = n;
+        return true;
+    }
+    return false;
+}
+
 // ---------------------------------------------------------------------------
 //  UploadSession
 // ---------------------------------------------------------------------------
@@ -199,6 +224,20 @@ bool UploadSession::closeChunk(std::string& error) {
     return true;
 }
 
+// Ghi nhận lỗi trong lúc nhận dữ liệu. Lỗi TẠM THỜI (Telegram bảo chờ) thì giữ
+// phiên ở trạng thái đang nhận để lượt gửi sau nối tiếp được; chỉ lỗi thật mới
+// đánh dấu Failed, vì phiên Failed không cho nối lại nữa.
+void UploadSession::ghiNhanLoi(const std::string& error) {
+    message_ = error;
+    int giay = 0;
+    if (laLoiTamThoi(error, giay)) {
+        state_ = UploadState::Receiving;
+        lastActivity_.store(nowUnix());
+        return;
+    }
+    state_ = UploadState::Failed;
+}
+
 bool UploadSession::receive(const uint8_t* data, size_t len, std::string& error) {
     if (cancelled_.load()) {
         error = "Phiên tải lên đã bị huỷ";
@@ -220,8 +259,7 @@ bool UploadSession::receive(const uint8_t* data, size_t len, std::string& error)
         }
         if (!writer_) {
             if (!openChunk(error)) {
-                state_ = UploadState::Failed;
-                message_ = error;
+                ghiNhanLoi(error);
                 return false;
             }
         }
@@ -230,15 +268,13 @@ bool UploadSession::receive(const uint8_t* data, size_t len, std::string& error)
             std::min<uint64_t>(remainingInChunk, static_cast<uint64_t>(len - offset)));
         if (take == 0) {
             if (!closeChunk(error)) {
-                state_ = UploadState::Failed;
-                message_ = error;
+                ghiNhanLoi(error);
                 return false;
             }
             continue;
         }
         if (!buffer_->append(data + offset, take, error)) {
-            state_ = UploadState::Failed;
-            message_ = error;
+            ghiNhanLoi(error);
             return false;
         }
         hasher_.update(data + offset, take);
@@ -249,8 +285,7 @@ bool UploadSession::receive(const uint8_t* data, size_t len, std::string& error)
 
         if (chunkWritten_ >= chunkSize_) {
             if (!closeChunk(error)) {
-                state_ = UploadState::Failed;
-                message_ = error;
+                ghiNhanLoi(error);
                 return false;
             }
         }

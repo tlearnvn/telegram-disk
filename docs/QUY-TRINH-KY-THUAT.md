@@ -431,7 +431,7 @@ flowchart LR
 |---|---|---|
 | 1 · trình duyệt → máy chủ | Wi-Fi chớp, máy ngủ, máy chủ khởi động lại | Thử lại 6 lần, giãn cách 1·2·4·8·16·30 giây; mỗi lần hỏi lại máy chủ đã nhận tới đâu rồi cắt tiếp từ đó |
 | 1' · WebDAV → máy chủ | Máy khách WebDAV không biết gửi tiếp | Máy chủ **giữ phiên dở**; lượt PUT sau gửi lại từ đầu, máy chủ băm phần trùng để đối chiếu rồi chỉ đẩy lên Telegram phần còn thiếu |
-| 2–3 · máy chủ → Telegram | Đứt TCP, hết giờ chờ, đổi trung tâm dữ liệu | Thử lại 3 lượt, giãn cách 0,5·1 giây, mở lại phiên mỗi lượt; tự theo `*_MIGRATE`; `FLOOD_WAIT` ≤ 30 giây thì chờ rồi làm lại |
+| 2–3 · máy chủ → Telegram | Đứt TCP, hết giờ chờ, đổi trung tâm dữ liệu | Thử lại 3 lượt, giãn cách 0,5·1 giây, mở lại phiên mỗi lượt; tự theo `*_MIGRATE`; lỗi "chờ chút" ≤ 60 giây thì chờ rồi làm lại, ngân sách riêng |
 | 3 · đọc mảnh | Tài khoản hỏng, tham chiếu hết hạn | Hỏi lại tham chiếu rồi đọc lại; vẫn hỏng thì lần lượt thử mọi tài khoản còn hoạt động |
 | 4 · MySQL | Máy chủ CSDL ngắt kết nối nhàn rỗi | Tự kết nối lại một lần rồi chạy lại câu lệnh |
 
@@ -472,6 +472,55 @@ không ai phát hiện thì tệp hỏng âm thầm, còn tệ hơn là báo l�
 > Nay có hai lớp chặn: `BodyReader::complete()` phải báo đủ, **và** số byte nhận
 > được phải bằng `Content-Length` mới cho đóng tệp. Thà trả 409 để máy khách gửi
 > lại, còn hơn lưu một tệp trông lành mà bên trong mất một nửa.
+
+### Họ lỗi "chờ chút rồi làm lại"
+
+Telegram không chỉ có `FLOOD_WAIT_x`. Nó có cả một họ, và điểm chung là **mã lỗi
+420** kèm một con số ở cuối tên:
+
+| Định danh | Khi nào gặp |
+|---|---|
+| `FLOOD_WAIT_x` | Gọi API quá nhiều |
+| `FLOOD_PREMIUM_WAIT_x` | **Tài khoản thường tải lên quá nhanh** — Telegram siết tốc độ và gợi ý mua Premium |
+| `SLOWMODE_WAIT_x` | Siêu nhóm đang bật chế độ chậm |
+| `TAKEOUT_INIT_DELAY_x` | Đang xin xuất dữ liệu |
+
+Đúng cách xử lý là **chờ rồi làm lại**, nên họ lỗi này có ngân sách riêng, không
+tiêu vào số lần thử dành cho lỗi mạng: mỗi lần chờ tối đa 60 giây, tổng thời gian
+nằm chờ trong một lời gọi tối đa 180 giây. Chờ lâu hơn thì nhường cho tài khoản
+khác trong nhóm.
+
+Ở tầng HTTP, lỗi loại này trả **503 kèm `Retry-After`** thay vì 5xx chung chung.
+`rclone`, `davfs2` và vòng thử lại của giao diện web đều hiểu tiêu đề đó, nên
+chúng chờ đúng số giây Telegram yêu cầu thay vì tự đoán.
+
+> **Đã từng sai ở đây, và cái sai gọn tới mức buồn cười: đúng một dòng.**
+>
+> ```cpp
+> if (startsWith(res.error.message, "FLOOD_WAIT_")) {   // ← chỉ bắt đúng một tên
+> ```
+>
+> `FLOOD_PREMIUM_WAIT_3` **không** bắt đầu bằng `FLOOD_WAIT_`. Nên toàn bộ cơ chế
+> chờ-rồi-làm-lại mà tui viết ra để cứu những lượt tải hàng giờ… không hề chạy
+> cho đúng cái lỗi mà tài khoản thường gặp thường xuyên nhất khi tải tệp lớn.
+>
+> Hậu quả dây chuyền, và mỗi tầng lại nhân hậu quả lên:
+> 1. Lỗi rơi thẳng ra ngoài như một lỗi vĩnh viễn.
+> 2. WebDAV thấy lỗi ghi thì **huỷ phiên** — xoá sạch phần đã đẩy lên.
+> 3. Trả `507 Insufficient Storage`, một mã hoàn toàn sai bản chất: đây là giới
+>    hạn tần suất, không phải hết chỗ.
+> 4. `rclone` nhận 507, coi là lỗi thật, gửi lại **cả tệp từ byte 0**.
+>
+> Kết quả thật: tệp gần 1 GB chết ở phần 121/1856 vì Telegram bảo **nghỉ 3 giây**.
+>
+> Nay bắt theo mã 420 chứ không đoán tên; WebDAV giữ phiên lại; trả 503 kèm
+> `Retry-After`. Và một chỗ nữa phải sửa mới thật sự nối lại được: `receive()`
+> đánh dấu phiên là `Failed` với mọi lỗi, mà `claimResumable` chỉ nhận phiên đang
+> `Receiving` — nên phiên "được giữ" vẫn không nối lại được. Giờ lỗi tạm thời giữ
+> nguyên trạng thái đang nhận.
+>
+> Bài học: **đừng nhận diện một họ lỗi bằng cách so tên chuỗi.** Máy chủ đặt thêm
+> tên mới là code câm lặng, và bạn chỉ biết khi có người gửi ảnh chụp nhật ký.
 
 ---
 

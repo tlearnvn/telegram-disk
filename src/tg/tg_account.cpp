@@ -20,9 +20,12 @@ constexpr const char* kTag = "tg.acc";
 constexpr uint32_t kDownloadBlock = 1024 * 1024;  // 1 MB — giới hạn của upload.getFile
 // Số lần thử một lời gọi API trước khi chịu thua (rớt mạng, hết giờ chờ…).
 constexpr int kSoLanThuGoiApi = 3;
-// FLOOD_WAIT tới ngần này giây thì tự chờ rồi làm lại; lâu hơn mới trả lỗi lên
-// trên để nhóm tài khoản đổi sang tài khoản khác.
-constexpr int kFloodWaitTuChoToiDaGiay = 30;
+// Telegram bảo chờ tới ngần này giây thì tự chờ rồi làm lại; lâu hơn mới trả lỗi
+// lên trên để nhóm tài khoản đổi sang tài khoản khác.
+constexpr int kChoToiDaGiay = 60;
+// Tổng thời gian được phép nằm chờ trong MỘT lời gọi. Chặn cái bẫy "mỗi lần chờ
+// đều ngắn nhưng chờ mãi không hết".
+constexpr int kTongChoToiDaGiay = 180;
 
 bool isMigrationError(const std::string& msg, int& dcOut) {
     static const char* kPrefixes[] = {"FILE_MIGRATE_", "NETWORK_MIGRATE_", "PHONE_MIGRATE_",
@@ -34,6 +37,26 @@ bool isMigrationError(const std::string& msg, int& dcOut) {
         }
     }
     return false;
+}
+
+// Telegram có cả một họ lỗi "chờ chừng này giây rồi làm lại", không chỉ mỗi
+// FLOOD_WAIT_x: còn FLOOD_PREMIUM_WAIT_x (giới hạn tốc độ tải lên của tài khoản
+// thường), SLOWMODE_WAIT_x (siêu nhóm bật chế độ chậm), TAKEOUT_INIT_DELAY_x…
+// Điểm chung của cả họ là **mã lỗi 420** và một con số ở cuối tên. Bắt theo mã
+// thì không sót khi Telegram đặt thêm tên mới; danh sách tiền tố chỉ là lưới đỡ
+// cho trường hợp máy chủ trả mã khác.
+bool laLoiBaoCho(const RpcError& err, int& giayOut) {
+    static const char* kTienTo[] = {"FLOOD_WAIT_", "FLOOD_PREMIUM_WAIT_", "SLOWMODE_WAIT_",
+                                    "TAKEOUT_INIT_DELAY_", "PREMIUM_SUB_ACTIVE_UNTIL_"};
+    bool hopLe = err.code == 420;
+    if (!hopLe) {
+        for (const char* p : kTienTo) {
+            if (startsWith(err.message, p)) { hopLe = true; break; }
+        }
+    }
+    if (!hopLe || err.value <= 0) return false;
+    giayOut = err.value;
+    return true;
 }
 }  // namespace
 
@@ -226,6 +249,7 @@ InvokeResult TgAccount::invoke(const TlValue& request, int dcId, int timeoutMs) 
         return r;
     }
 
+    int daChoGiay = 0;   // tổng thời gian đã nằm chờ theo yêu cầu của Telegram
     for (int attempt = 0; attempt < kSoLanThuGoiApi; ++attempt) {
         std::string error;
         MtprotoSession* s = session(dcId, error);
@@ -254,24 +278,27 @@ InvokeResult TgAccount::invoke(const TlValue& request, int dcId, int timeoutMs) 
                 if (attempt == 0) config_.homeDc = newDc;  // PHONE_MIGRATE/USER_MIGRATE
                 continue;
             }
-            if (startsWith(res.error.message, "FLOOD_WAIT_")) {
-                int seconds = res.error.value;
-                // FLOOD_WAIT ngắn thì chờ rồi làm lại: bỏ cuộc ngay sẽ giết cả
-                // phiên tải lên tệp lớn chạy hàng giờ chỉ vì Telegram bảo nghỉ
-                // vài giây. Chờ dài mới trả về để tầng trên đổi tài khoản khác.
-                if (seconds > 0 && seconds <= kFloodWaitTuChoToiDaGiay &&
-                    attempt + 1 < kSoLanThuGoiApi) {
-                    LOG_WARN(kTag, "[%s] Telegram bảo chờ %d giây — chờ rồi làm lại",
-                             config_.label.c_str(), seconds);
-                    setLastError("Đang chờ " + std::to_string(seconds) + " giây theo yêu cầu"
-                                 " của Telegram");
-                    std::this_thread::sleep_for(std::chrono::seconds(seconds + 1));
+            int giayCho = 0;
+            if (laLoiBaoCho(res.error, giayCho)) {
+                // Chờ rồi làm lại là phản ứng ĐÚNG với họ lỗi này, nên nó có
+                // ngân sách riêng chứ không tiêu vào số lần thử dành cho lỗi
+                // mạng: bỏ cuộc sớm sẽ giết cả phiên tải tệp lớn chạy hàng giờ
+                // chỉ vì Telegram bảo nghỉ vài giây.
+                if (giayCho <= kChoToiDaGiay && daChoGiay + giayCho <= kTongChoToiDaGiay) {
+                    daChoGiay += giayCho;
+                    LOG_WARN(kTag, "[%s] %s bảo chờ %d giây — chờ rồi làm lại (đã chờ %d/%d giây)",
+                             config_.label.c_str(), res.error.message.c_str(), giayCho, daChoGiay,
+                             kTongChoToiDaGiay);
+                    setLastError("Đang chờ " + std::to_string(giayCho) +
+                                 " giây theo yêu cầu của Telegram");
+                    std::this_thread::sleep_for(std::chrono::seconds(giayCho + 1));
+                    --attempt;   // lượt chờ không tính vào ngân sách lỗi mạng
                     continue;
                 }
-                floodWaitUntil_.store(nowUnix() + seconds);
-                LOG_WARN(kTag, "[%s] Telegram giới hạn tần suất %d giây", config_.label.c_str(),
-                         seconds);
-                setLastError("Bị giới hạn tần suất " + std::to_string(seconds) + " giây");
+                floodWaitUntil_.store(nowUnix() + giayCho);
+                LOG_WARN(kTag, "[%s] Giới hạn tần suất %d giây, quá sức chờ — nhường tài khoản khác",
+                         config_.label.c_str(), giayCho);
+                setLastError("Bị giới hạn tần suất " + std::to_string(giayCho) + " giây");
                 return res;
             }
             if (res.error.message == "AUTH_KEY_UNREGISTERED" ||

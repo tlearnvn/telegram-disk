@@ -53,6 +53,15 @@ enum class UploadState {
 const char* uploadStateName(UploadState s);
 const char* uploadStateNameVi(UploadState s);
 
+// Lỗi này có phải loại "chờ chút rồi làm lại" không? Nếu đúng, `giayOut` nhận số
+// giây Telegram yêu cầu chờ (0 nếu không đọc được).
+//
+// Phải nhận diện bằng chuỗi vì thông điệp lỗi đi từ tầng MTProto lên tới tầng
+// HTTP dưới dạng văn bản. Bù lại, thứ đem so là **định danh lỗi của Telegram** —
+// FLOOD_WAIT, FLOOD_PREMIUM_WAIT, SLOWMODE_WAIT — chứ không phải câu tiếng Việt
+// do ứng dụng tự đặt, nên đổi cách diễn đạt thông báo không làm hỏng phép so.
+bool laLoiTamThoi(const std::string& error, int& giayOut);
+
 struct UploadProgress {
     std::string id;
     std::string name;
@@ -109,6 +118,8 @@ public:
 private:
     friend class UploadManager;
 
+    // Lỗi tạm thời thì giữ phiên đang nhận; lỗi thật mới đánh dấu Failed.
+    void ghiNhanLoi(const std::string& error);
     bool openChunk(std::string& error);
     bool closeChunk(std::string& error);
     void rollback();

@@ -440,6 +440,23 @@ void registerWebdavRoutes(HttpServer& server, app::App& app) {
                 if (offset >= static_cast<size_t>(n)) continue;
                 if (!session->receive(buffer + offset, static_cast<size_t>(n) - offset,
                                       writeError)) {
+                    // Bị giới hạn tần suất là chuyện TẠM THỜI. Huỷ phiên ở đây
+                    // đồng nghĩa bắt máy khách gửi lại cả tệp từ byte 0 —
+                    // rclone làm đúng thế, và với tệp gần 1 GB thì đó là tai
+                    // hoạ. Giữ phiên lại để lượt gửi sau nối tiếp được, rồi trả
+                    // 503 kèm Retry-After để máy khách biết chờ bao lâu.
+                    int giayCho = 0;
+                    if (storage::laLoiTamThoi(writeError, giayCho)) {
+                        LOG_WARN(kTag, "Tạm thời không ghi được '%s' (%s) — giữ %s để nối lại",
+                                 vpath.c_str(), writeError.c_str(),
+                                 formatBytes(session->receivedBytes()).c_str());
+                        res.setHeader("Retry-After", std::to_string(giayCho > 0 ? giayCho : 5));
+                        res.setText("Telegram đang giới hạn tần suất: " + writeError +
+                                        ". Phần đã nhận được giữ lại — gửi lại tệp để nối tiếp.",
+                                    503);
+                        res.closeConnection = true;
+                        return;
+                    }
                     app.uploads()->cancel(uploadId, writeError);
                     res.setText(writeError, 507);
                     return;

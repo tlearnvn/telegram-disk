@@ -1047,7 +1047,13 @@ async function taiMotTep(file, chinhSach = 'ask') {
       // lên phía máy chủ vẫn sống (mặc định 30 phút không hoạt động mới dọn).
       const dangHong = !res || res.status === 409 || res.status >= 500;
       if (dangHong) {
+        // Máy chủ bảo chờ bao lâu thì chờ đúng bấy lâu. 503 + Retry-After là
+        // Telegram đang giới hạn tần suất — đoán giãn cách của mình thì hoặc
+        // chờ thiếu (bị từ chối tiếp) hoặc chờ thừa (chậm vô ích).
+        let choTheoMayChu = 0;
         if (res && res.status !== 409) {
+          const ra = Number(res.headers.get('Retry-After'));
+          if (Number.isFinite(ra) && ra > 0) choTheoMayChu = Math.min(120, ra) * 1000;
           try { const j = await res.json(); if (j && j.error) theoDoi.loiCuoi = j.error; }
           catch (e) { theoDoi.loiCuoi = `máy chủ trả về ${res.status}`; }
         }
@@ -1056,9 +1062,13 @@ async function taiMotTep(file, chinhSach = 'ask') {
           throw new Error(`${theoDoi.loiCuoi || 'mất kết nối'} — đã thử lại ` +
                           `${SO_LAN_THU_LAI} lần`);
         }
-        const cho = Math.min(30000, 1000 * Math.pow(2, luotHong - 1));  // 1·2·4·8·16·30 s
-        theoDoi.trangThai = `Mất kết nối — thử lại lần ${luotHong}/${SO_LAN_THU_LAI}` +
-                            ` sau ${Math.round(cho / 1000)}s`;
+        // Không có Retry-After thì tự giãn cách 1·2·4·8·16·30 giây.
+        const cho = choTheoMayChu || Math.min(30000, 1000 * Math.pow(2, luotHong - 1));
+        theoDoi.trangThai = choTheoMayChu
+          ? `Telegram giới hạn tần suất — chờ ${Math.round(cho / 1000)}s rồi tiếp` +
+            ` (lần ${luotHong}/${SO_LAN_THU_LAI})`
+          : `Mất kết nối — thử lại lần ${luotHong}/${SO_LAN_THU_LAI}` +
+            ` sau ${Math.round(cho / 1000)}s`;
         theoDoi.lop = 'warn';
         veDanhSachTaiLen();
         await nguQuaHuy(cho, theoDoi);

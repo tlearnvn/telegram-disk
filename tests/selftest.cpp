@@ -26,6 +26,7 @@
 #include "http/mime.h"
 #include "storage/download_stream.h"
 #include "storage/storage_engine.h"
+#include "storage/upload_manager.h"
 #include "tg/storage_backend.h"
 #include "tg/mtproto_crypto.h"
 #include "tg/tl_codec.h"
@@ -918,6 +919,41 @@ void testDoiTaiKhoanKhiDoc() {
 }
 
 // ---------------------------------------------------------------------------
+void testLoiBaoCho() {
+    nhom("Nhận diện lỗi \"chờ chút rồi làm lại\"");
+    int giay = -1;
+
+    // Đúng chuỗi lỗi gặp thật khi tải bằng WebDAV bằng tài khoản thường.
+    kiem(storage::laLoiTamThoi(
+             "Tải phần 121/1856 thất bại: Lỗi máy chủ: 420 FLOOD_PREMIUM_WAIT_3", giay),
+         "nhận ra FLOOD_PREMIUM_WAIT lẫn trong câu tiếng Việt");
+    kiem(giay == 3, "đọc đúng 3 giây từ FLOOD_PREMIUM_WAIT_3");
+
+    kiem(storage::laLoiTamThoi("Lỗi máy chủ: 420 FLOOD_WAIT_42", giay), "nhận ra FLOOD_WAIT");
+    kiem(giay == 42, "đọc đúng 42 giây");
+
+    kiem(storage::laLoiTamThoi("420 SLOWMODE_WAIT_10", giay), "nhận ra SLOWMODE_WAIT");
+    kiem(giay == 10, "đọc đúng 10 giây từ SLOWMODE_WAIT_10");
+
+    // FLOOD_PREMIUM_WAIT_ phải được thử TRƯỚC FLOOD_WAIT_, không thì tiền tố
+    // ngắn hơn khớp trước và số giây đọc ra sai chỗ.
+    kiem(storage::laLoiTamThoi("FLOOD_PREMIUM_WAIT_7", giay) && giay == 7,
+         "tiền tố dài được ưu tiên, không bị FLOOD_WAIT_ giành trước");
+
+    // Những lỗi KHÔNG phải loại chờ thì đừng nhận vơ — giữ phiên lại vô ích.
+    kiem(!storage::laLoiTamThoi("400 CHANNEL_INVALID", giay), "CHANNEL_INVALID không phải lỗi chờ");
+    kiem(!storage::laLoiTamThoi("401 AUTH_KEY_UNREGISTERED", giay),
+         "AUTH_KEY_UNREGISTERED không phải lỗi chờ");
+    kiem(!storage::laLoiTamThoi("Không còn dung lượng trên đĩa", giay),
+         "hết đĩa không phải lỗi chờ");
+    kiem(!storage::laLoiTamThoi("", giay), "chuỗi rỗng không phải lỗi chờ");
+
+    // Có định danh mà không có số thì vẫn là lỗi chờ, chỉ là không biết chờ bao lâu.
+    kiem(storage::laLoiTamThoi("420 FLOOD_WAIT", giay) && giay == 0,
+         "thiếu số giây vẫn nhận là lỗi chờ, giây trả về 0");
+}
+
+// ---------------------------------------------------------------------------
 void testCauHinh() {
     nhom("Cấu hình");
     Config& cfg = Config::instance();
@@ -1071,6 +1107,7 @@ int main() {
     testMysqlThoat();
     testCoSoDuLieu();
     testDoiTaiKhoanKhiDoc();
+    testLoiBaoCho();
     testCauHinh();
     testInitConnection();
     testPhienBan();

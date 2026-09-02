@@ -798,6 +798,21 @@ void registerApiRoutes(HttpServer& server, app::App& app) {
             }
             if (n == 0) break;
             if (!session->receive(buffer, static_cast<size_t>(n), error)) {
+                // Giới hạn tần suất là tạm thời: trả 503 kèm Retry-After để
+                // vòng thử lại của trình duyệt chờ rồi nối tiếp, thay vì 500
+                // làm nó bỏ hẳn phiên.
+                int giayCho = 0;
+                if (storage::laLoiTamThoi(error, giayCho)) {
+                    LOG_WARN(kTag, "[%s] Tạm thời không ghi được: %s", id.c_str(), error.c_str());
+                    res.setHeader("Retry-After", std::to_string(giayCho > 0 ? giayCho : 5));
+                    Json j = Json::object();
+                    j.set("ok", false);
+                    j.set("error", error);
+                    j.set("received", session->receivedBytes());
+                    j.set("retry_after", static_cast<int64_t>(giayCho > 0 ? giayCho : 5));
+                    res.setJson(j, 503);
+                    return;
+                }
                 sendError(res, 500, error);
                 return;
             }

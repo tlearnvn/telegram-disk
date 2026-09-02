@@ -459,6 +459,21 @@ Tự build thì đừng tắt `TTD_FULLY_STATIC` (mặc định đã bật). Ki�
 ldd tuan-telegram-disk     # phải in "not a dynamic executable"
 ```
 
+### `FLOOD_PREMIUM_WAIT` khi tải tệp lớn
+
+Telegram siết tốc độ tải lên của **tài khoản thường** (không Premium) và trả lỗi
+`420 FLOOD_PREMIUM_WAIT_3` — nghĩa là "nghỉ 3 giây rồi tiếp".
+
+Từ bản này ứng dụng tự chờ rồi làm lại, và **phần đã tải lên được giữ nguyên** để
+nối tiếp. Tải bằng WebDAV cũng vậy: máy chủ trả 503 kèm `Retry-After`, rclone hay
+davfs2 sẽ chờ đúng số giây đó rồi gửi lại, và máy chủ nối tiếp từ chỗ đã dừng.
+
+Muốn đỡ gặp thì: thêm nhiều tài khoản Telegram để chia tải, hoặc giảm
+**Số mảnh tải song song** trong Cài đặt cho nhẹ tay hơn.
+
+> Bản trước bản này báo `507 Insufficient Storage` rồi huỷ cả lượt tải — đó là
+> lỗi của ứng dụng, không phải máy chủ hết chỗ. Đã sửa.
+
 ### `FLOOD_WAIT`
 
 Telegram bắt chờ vì gửi quá nhanh. Ứng dụng tự chờ rồi thử lại. Bị thường xuyên
