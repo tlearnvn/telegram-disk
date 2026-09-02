@@ -86,7 +86,7 @@ mkdir -p "$THU_MUC_XUAT/schema"
 cp "$THU_MUC_BUILD/tuan-telegram-disk" "$THU_MUC_XUAT/"
 cp "$GOC/schema/"*.tl "$THU_MUC_XUAT/schema/"
 cp "$GOC/README.md" "$THU_MUC_XUAT/" 2>/dev/null || true
-cp "$GOC/LICENSE" "$THU_MUC_XUAT/" 2>/dev/null || true
+cp "$GOC/LICENSE" "$GOC/NOTICE" "$THU_MUC_XUAT/" 2>/dev/null || true
 strip --strip-unneeded "$THU_MUC_XUAT/tuan-telegram-disk" 2>/dev/null || true
 
 # Tệp dịch vụ systemd mẫu.

@@ -1,0 +1,16 @@
+Tuấn's Telegram Disk
+Copyright (c) 2026 Tuandethuong
+Phát hành theo giấy phép MIT — xem tệp LICENSE.
+
+Phần mềm này có kèm mã nguồn của dự án bên thứ ba sau:
+
+* SQLite (third_party/sqlite)
+  Thuộc phạm vi công cộng (public domain).
+  https://www.sqlite.org/copyright.html
+
+Mọi phần còn lại đều do tác giả tự viết, không dùng thư viện ngoài nào khác:
+máy chủ HTTP, WebDAV, MTProto, mật mã (SHA-1/256/512, MD5, HMAC, PBKDF2,
+AES-IGE/CBC/CTR, RSA, SRP, số nguyên lớn), giải nén gzip, phân giải DNS, và
+trình điều khiển MySQL nói thẳng giao thức mạng.
+
+Thiết kế bởi Tuandethuong.

@@ -17,13 +17,15 @@
 
 ### ⬇️ Tải về
 
+[![Tải bản mới nhất](https://img.shields.io/badge/t%E1%BA%A3i%20b%E1%BA%A3n%20m%E1%BB%9Bi%20nh%E1%BA%A5t-Linux%20amd64%20%C2%B7%20Windows%20x64-2b7fff?style=for-the-badge)](https://github.com/tlearnvn/telegram-disk/releases/latest)
+
 | Hệ điều hành | Gói | Cách chạy |
 |---|---|---|
-| **Debian · Ubuntu · VPS** (amd64) | [![Tải bản Linux](https://img.shields.io/badge/t%E1%BA%A3i%20v%E1%BB%81-linux--amd64.tar.gz-2b7fff?logo=linux&logoColor=white)](https://github.com/tlearnvn/telegram-disk/releases/latest/download/tuan-telegram-disk-linux-amd64.tar.gz) | Giải nén rồi `./chay.sh` |
-| **Windows 10/11** 64-bit | [![Tải bản Windows](https://img.shields.io/badge/t%E1%BA%A3i%20v%E1%BB%81-windows--x64.zip-2b7fff?logo=windows&logoColor=white)](https://github.com/tlearnvn/telegram-disk/releases/latest/download/tuan-telegram-disk-windows-x64.zip) | Giải nén rồi bấm đúp `chay.bat` |
+| **Debian · Ubuntu · VPS** (amd64) | `…-linux-amd64.tar.gz` | Giải nén rồi `./chay.sh` |
+| **Windows 10/11** 64-bit | `…-windows-x64.zip` | Giải nén rồi bấm đúp `chay.bat` |
 
-Xem [tất cả bản phát hành](https://github.com/tlearnvn/telegram-disk/releases) ·
-[đối chiếu SHA-256](https://github.com/tlearnvn/telegram-disk/releases/latest/download/SHA256SUMS.txt)
+Mỗi bản phát hành kèm `SHA256SUMS.txt` để đối chiếu ·
+[tất cả bản phát hành](https://github.com/tlearnvn/telegram-disk/releases)
 
 📖 **[Hướng dẫn sử dụng](docs/HUONG-DAN-SU-DUNG.md)** — từ lúc cài đặt tới khi
 gắn ổ đĩa vào máy tính, kèm ảnh chụp từng bước.\
