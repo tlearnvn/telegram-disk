@@ -3,7 +3,27 @@
 > Ổ đĩa lưu trữ "không giới hạn" dùng Telegram làm nơi chứa dữ liệu.
 > Viết hoàn toàn bằng C++17, chạy độc lập, không cần cài thêm gì.
 
+[![Bản phát hành](https://img.shields.io/github/v/release/tlearnvn/telegram-disk?label=b%E1%BA%A3n%20ph%C3%A1t%20h%C3%A0nh&color=2b7fff)](https://github.com/tlearnvn/telegram-disk/releases/latest)
+[![Phát hành](https://img.shields.io/github/actions/workflow/status/tlearnvn/telegram-disk/phat-hanh.yml?label=build&logo=githubactions&logoColor=white)](https://github.com/tlearnvn/telegram-disk/actions/workflows/phat-hanh.yml)
+[![Lượt tải](https://img.shields.io/github/downloads/tlearnvn/telegram-disk/total?label=l%C6%B0%E1%BB%A3t%20t%E1%BA%A3i&color=16a34a)](https://github.com/tlearnvn/telegram-disk/releases)
+[![Giấy phép](https://img.shields.io/github/license/tlearnvn/telegram-disk?label=gi%E1%BA%A5y%20ph%C3%A9p)](LICENSE)
+\
+![C++17](https://img.shields.io/badge/C%2B%2B-17-00599C?logo=cplusplus&logoColor=white)
+![Không phụ thuộc](https://img.shields.io/badge/ph%E1%BB%A5%20thu%E1%BB%99c-kh%C3%B4ng%20c%C3%B3-555)
+![Nền tảng](https://img.shields.io/badge/n%E1%BB%81n%20t%E1%BA%A3ng-Linux%20amd64%20%C2%B7%20Windows%20x64-444)
+![Tự kiểm tra](https://img.shields.io/badge/t%E1%BB%B1%20ki%E1%BB%83m%20tra-248%20ph%C3%A9p-16a34a)
+
 **Thiết kế bởi Tuandethuong.**
+
+### ⬇️ Tải về
+
+| Hệ điều hành | Gói | Cách chạy |
+|---|---|---|
+| **Debian · Ubuntu · VPS** (amd64) | [![Tải bản Linux](https://img.shields.io/badge/t%E1%BA%A3i%20v%E1%BB%81-linux--amd64.tar.gz-2b7fff?logo=linux&logoColor=white)](https://github.com/tlearnvn/telegram-disk/releases/latest/download/tuan-telegram-disk-linux-amd64.tar.gz) | Giải nén rồi `./chay.sh` |
+| **Windows 10/11** 64-bit | [![Tải bản Windows](https://img.shields.io/badge/t%E1%BA%A3i%20v%E1%BB%81-windows--x64.zip-2b7fff?logo=windows&logoColor=white)](https://github.com/tlearnvn/telegram-disk/releases/latest/download/tuan-telegram-disk-windows-x64.zip) | Giải nén rồi bấm đúp `chay.bat` |
+
+Xem [tất cả bản phát hành](https://github.com/tlearnvn/telegram-disk/releases) ·
+[đối chiếu SHA-256](https://github.com/tlearnvn/telegram-disk/releases/latest/download/SHA256SUMS.txt)
 
 📖 **[Hướng dẫn sử dụng](docs/HUONG-DAN-SU-DUNG.md)** — từ lúc cài đặt tới khi
 gắn ổ đĩa vào máy tính, kèm ảnh chụp từng bước.\

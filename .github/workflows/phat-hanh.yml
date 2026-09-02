@@ -79,6 +79,17 @@ jobs:
           TTD_AUTO_BUMP: 'OFF'
         run: ./build-windows.sh
 
+      # Ngoài tên có số phiên bản (để lưu trữ), đính kèm thêm bản tên cố định.
+      # Nhờ đó link .../releases/latest/download/<tên cố định> trong README luôn
+      # trỏ đúng bản mới nhất, không phải sửa lại mỗi lần lên phiên bản.
+      - name: Tạo bản sao mang tên cố định
+        run: |
+          cd dist
+          cp "tuan-telegram-disk-${{ steps.ver.outputs.phien_ban }}-linux-amd64.tar.gz" \
+             tuan-telegram-disk-linux-amd64.tar.gz
+          cp "tuan-telegram-disk-${{ steps.ver.outputs.phien_ban }}-windows-x64.zip" \
+             tuan-telegram-disk-windows-x64.zip
+
       - name: Tính tổng kiểm SHA-256
         run: |
           cd dist
