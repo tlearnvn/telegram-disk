@@ -1,12 +1,17 @@
 # Quy trình kỹ thuật — Tuấn's Telegram Disk
 
-Tài liệu này mô tả ứng dụng hoạt động ra sao ở bên trong: kiến trúc, đường đi của
-dữ liệu khi tải lên và tải xuống, cách nói chuyện với Telegram, cách lưu siêu dữ
-liệu, và những giới hạn đã biết.
+Tài liệu này mổ ứng dụng ra xem bên trong có gì: kiến trúc, đường đi của từng
+byte lúc lên lúc xuống, cách nói chuyện với Telegram, cách lưu bản đồ, và —
+phần mà tui nghĩ đáng đọc nhất — **danh sách những chỗ đã làm sai rồi sửa**.
 
-Dành cho người muốn sửa mã nguồn, tự dựng bản build, hoặc đơn giản là muốn hiểu
-dữ liệu của mình đang nằm ở đâu. Nếu bạn chỉ cần dùng ứng dụng, xem
-[Hướng dẫn sử dụng](HUONG-DAN-SU-DUNG.md).
+Vì tài liệu kỹ thuật mà chỉ kể chuyện thành công thì đọc như tờ rơi quảng cáo.
+Mấy chỗ vấp mới là chỗ dạy được điều gì. Chúng nằm rải khắp tài liệu trong các
+khối bắt đầu bằng **"Đã từng sai ở đây"** — ai định viết một ứng dụng tương tự
+thì đọc riêng mấy khối đó trước cũng được, tiết kiệm được vài buổi tối.
+
+Dành cho người muốn sửa mã nguồn, tự dựng bản build, hoặc chỉ tò mò dữ liệu của
+mình đang nằm ở đâu. Chỉ cần dùng thôi thì qua
+[Hướng dẫn sử dụng](HUONG-DAN-SU-DUNG.md), đỡ nhức đầu.
 
 ---
 
@@ -18,35 +23,42 @@ dữ liệu của mình đang nằm ở đâu. Nếu bạn chỉ cần dùng ứ
 4. [Cắt mảnh và ánh xạ byte](#4-cắt-mảnh-và-ánh-xạ-byte)
 5. [Luồng tải xuống và Range](#5-luồng-tải-xuống-và-range)
 6. [Khử trùng lặp](#6-khử-trùng-lặp)
-7. [Huỷ và dọn dẹp](#7-huỷ-và-dọn-dẹp)
+7. [Huỷ, dọn dẹp và rớt mạng](#7-huỷ-dọn-dẹp-và-rớt-mạng)
 8. [Tầng MTProto](#8-tầng-mtproto)
 9. [Schema TL và quy tắc CRC32](#9-schema-tl-và-quy-tắc-crc32)
 10. [Nhiều tài khoản](#10-nhiều-tài-khoản)
 11. [Cơ sở dữ liệu](#11-cơ-sở-dữ-liệu)
 12. [Bảo mật](#12-bảo-mật)
-13. [Kết quả kiểm thử](#13-kết-quả-kiểm-thử)
-14. [Giới hạn đã biết](#14-giới-hạn-đã-biết)
+13. [Một tệp thực thi, chạy mọi nơi](#13-một-tệp-thực-thi-chạy-mọi-nơi)
+14. [Kết quả kiểm thử](#14-kết-quả-kiểm-thử)
+15. [Giới hạn đã biết](#15-giới-hạn-đã-biết)
 
 ---
 
 ## 1. Ý tưởng
 
 Telegram cho tài khoản thường gửi tệp tới **2 GB mỗi tệp** và **không giới hạn
-tổng dung lượng**. Ứng dụng khai thác điều đó: cắt tệp thành từng mảnh, gửi mỗi
-mảnh làm một tin nhắn tài liệu vào một siêu nhóm riêng tư của bạn, rồi ghi lại
-"tệp X gồm những mảnh nào, mảnh nào nằm ở tin nhắn nào".
+tổng dung lượng**. Nhìn con số đó xong thì khó mà không nghĩ tới chuyện biến nó
+thành ổ đĩa. Ứng dụng làm đúng thế: cắt tệp thành từng mảnh, gửi mỗi mảnh làm
+một tin nhắn tài liệu vào siêu nhóm riêng của bạn, rồi ghi vào sổ "tệp X gồm
+mảnh nào, mảnh nào nằm ở tin nhắn số bao nhiêu".
 
-Telegram giữ **dữ liệu**. Ứng dụng giữ **bản đồ**. Mất bản đồ thì dữ liệu vẫn
-còn trên Telegram nhưng thành một đống tệp rời rạc không tên — nên hãy sao lưu
-cơ sở dữ liệu.
+Nói gọn: **Telegram giữ dữ liệu, ứng dụng giữ bản đồ.** Mất bản đồ thì dữ liệu
+vẫn nằm nguyên trên Telegram, chỉ là thành một đống mảnh rời không tên không thứ
+tự — về mặt thực dụng thì coi như mất. Nên câu quan trọng nhất của cả tài liệu
+này là: **sao lưu `data/`**. Phần còn lại chỉ là chi tiết.
 
-Ba ràng buộc định hình toàn bộ thiết kế:
+Ba ràng buộc, và ba ràng buộc này định hình gần như mọi quyết định phía sau:
 
 | Ràng buộc | Hệ quả |
 |---|---|
 | Tệp có thể lớn hơn RAM của máy chủ | Không được giữ trọn tệp trong bộ nhớ ⇒ tải lên theo luồng |
-| Telegram giới hạn kích thước mỗi tệp | Phải cắt mảnh, và phải ghép lại đúng thứ tự khi đọc |
-| Xem phim cần tua được | Phải đọc được một khoảng byte bất kỳ mà không tải cả tệp |
+| Telegram giới hạn kích thước mỗi tệp | Phải cắt mảnh, và ghép lại phải đúng thứ tự tới từng byte |
+| Xem phim thì phải tua được | Phải đọc một khoảng byte bất kỳ mà không tải cả tệp |
+
+Ràng buộc thứ nhất là ràng buộc khó chịu nhất. Nó cấm luôn cái cách viết dễ
+nhất — nhận hết tệp vào RAM rồi mới xử lý — và bắt mọi thứ phải chạy theo
+luồng, kể cả những chỗ mà chạy theo luồng phức tạp hơn hẳn.
 
 ---
 
@@ -117,7 +129,12 @@ schema/       mtproto.tl và api.tl (bản chính thức, layer 229)
 ## 3. Luồng tải lên
 
 Điểm mấu chốt: **dữ liệu không bao giờ nằm trọn ở đâu cả**. Trình duyệt gửi từng
-phần 8 MB, máy chủ nhận được bao nhiêu đẩy thẳng lên Telegram bấy nhiêu.
+phần 8 MB, máy chủ nhận được bao nhiêu đẩy thẳng lên Telegram bấy nhiêu. Không
+có tệp tạm, không có "để tui giữ hộ một lát".
+
+Nghe thì hiển nhiên, nhưng nó là lý do một VPS 512 MB RAM tải được tệp 100 GB.
+Nếu viết theo kiểu nhận-hết-rồi-xử-lý thì tệp 100 GB cần 100 GB RAM, và bạn sẽ
+gặp OOM killer sớm hơn là gặp Telegram.
 
 ```mermaid
 sequenceDiagram
@@ -156,6 +173,16 @@ sequenceDiagram
     S-->>B: Thông tin tệp đã lưu
 ```
 
+Nhật ký thật của một lượt tải, đọc từ dưới lên thấy rõ từng mảnh được đóng lại
+và gửi đi — cỡ mảnh đặt 8 MB nên tệp 24,80 MB ra đúng 4 mảnh, mảnh cuối lẻ
+814,62 KB:
+
+![Nhật ký cắt mảnh](anh/kt-02-nhat-ky.png)
+
+Để ý dòng gần cuối: `Nội dung trùng với '/Phim tai lieu 4K.mkv' — dùng lại dữ
+liệu đã có`. Đó là lưới an toàn khử trùng lặp bắt được một tệp giống hệt **sau
+khi** đã đẩy lên xong. Chi tiết ở [mục 6](#6-khử-trùng-lặp).
+
 ### Ba chế độ đệm
 
 Đệm mảnh (`ChunkBuffer`) quyết định dữ liệu tạm trú ở đâu giữa lúc nhận và lúc
@@ -167,10 +194,17 @@ sequenceDiagram
 | `memory` | Giữ trọn mảnh trong RAM rồi mới đẩy | Bằng cỡ mảnh | Máy nhiều RAM, muốn giải phóng trình duyệt sớm |
 | `disk` | Ghi ra tệp tạm, đẩy lên từ đó | Không đáng kể | Máy ít RAM, đĩa rộng, mạng tới Telegram chậm |
 
-Con số 512 KB không tự nghĩ ra: đó là kích thước phần (`part`) mà
-`upload.saveBigFilePart` của Telegram yêu cầu.
+Con số 512 KB không phải tui bốc ra cho vui: đó là đúng kích thước phần (`part`)
+mà `upload.saveBigFilePart` của Telegram đòi. Cãi lại không được.
 
-Nhờ chế độ `stream`, một VPS 512 MB RAM vẫn tải được tệp 100 GB.
+Giao diện cho thấy đủ thứ đang diễn ra ở tầng dưới — mảnh thứ mấy trên tổng bao
+nhiêu, tài khoản nào đang phục vụ, tốc độ thực, và thời gian còn lại:
+
+![Đang tải lên](anh/kt-03-dang-tai-len.png)
+
+Cột **Qua:** là tài khoản đang gánh mảnh này. Nhiều tài khoản thì cột đó đổi tên
+theo từng mảnh — đó là chỗ nhìn ra cơ chế chia tải ở
+[mục 10](#10-nhiều-tài-khoản).
 
 ---
 
@@ -287,7 +321,9 @@ không cộng dồn — bộ đệm là dùng chung.
 
 ## 6. Khử trùng lặp
 
-Kiểm tra hai vòng, vòng ngoài rẻ tiền và làm ngay trên trình duyệt:
+Nguyên tắc: **đừng bắt người ta trả tiền hai lần cho cùng một mớ byte.** Kiểm
+tra hai vòng — vòng ngoài rẻ tiền và làm ngay trên trình duyệt, vòng trong đắt
+hơn nhưng chắc chắn:
 
 ```mermaid
 flowchart TD
@@ -307,24 +343,39 @@ flowchart TD
     L -- Không --> N["Giữ mảnh vừa đẩy"]
 ```
 
-Vòng trong (SHA-256 toàn tệp, sau khi tải xong) là lưới an toàn: hai tệp khác
-tên, khác thời điểm, nhưng nội dung y hệt vẫn bị phát hiện và gộp lại.
+Vòng ngoài chỉ băm 64 KB đầu tệp, làm ngay trong trình duyệt trước khi gửi byte
+nào lên mạng — rẻ tới mức chạy luôn cho mọi lượt tải. Nó bắt được ca phổ biến
+nhất: cùng một tệp bị kéo vào hai lần.
 
-Vì thế thống kê tách làm hai con số:
+Vòng trong là SHA-256 toàn tệp, chạy **sau khi** đã tải xong. Nghe hơi muộn,
+nhưng nó bắt được ca mà vòng ngoài không thể: hai tệp khác tên, khác ngày, 64 KB
+đầu khác nhau, mà nội dung thật thì y hệt. Lúc đó mảnh vừa đẩy lên bị bỏ, tệp
+mới trỏ vào mảnh cũ.
 
-- **Tổng dung lượng đã dùng** — cộng kích thước từng tệp, con số "trên giấy tờ"
-- **Chiếm thật trên Telegram** — gộp theo `document_id`, mỗi mảnh dùng chung chỉ
-  tính một lần
+Vì có hai loại "dung lượng" nên thống kê phải tách làm hai con số, và đây là chỗ
+người dùng hay tưởng ứng dụng tính sai:
 
-Hai tệp 5 MB trùng nội dung ⇒ 10 MB trên giấy tờ, 5 MB thật, tiết kiệm 5 MB.
+- **Tổng dung lượng đã dùng** — cộng kích thước từng tệp. Con số "trên giấy tờ".
+- **Chiếm thật trên Telegram** — gộp theo `document_id`, mảnh dùng chung chỉ tính
+  một lần. Con số "thực thu".
+
+![Thống kê khử trùng lặp](anh/kt-01-thong-ke.png)
+
+Ảnh trên là số đo thật: **72,67 MB trên giấy tờ, 47,87 MB chiếm thật, tiết kiệm
+24,80 MB** — vì trong 5 tệp có một tệp là bản sao nội dung của tệp khác. Ô "Số
+mảnh trên Telegram" ghi *9 mảnh · 13 lượt tham chiếu*: 9 mảnh vật lý nhưng bảng
+`ttd_chunks` có 13 dòng trỏ vào chúng. Bốn dòng dư chính là tệp được liên kết
+lại, và bốn dòng đó không tốn thêm một byte nào trên Telegram.
 
 ---
 
-## 7. Huỷ và dọn dẹp
+## 7. Huỷ, dọn dẹp và rớt mạng
 
-Phiên tải lên bị bỏ dở mà không dọn sẽ để lại rác trên Telegram — những mảnh
-không tệp nào trỏ tới, không cách nào tìm lại. Nên mọi đường thoát đều dẫn về
-cùng một chỗ dọn dẹp:
+Phiên tải lên bỏ dở mà không dọn sẽ để lại rác trên Telegram: những mảnh không
+tệp nào trỏ tới, không cách nào tìm lại, không cách nào xoá vì bạn còn chẳng
+biết chúng tồn tại. Rác kiểu đó tích lại vài tháng là siêu nhóm phình lên mà
+không ai giải thích được. Nên mọi đường thoát đều bắt buộc dẫn về cùng một chỗ
+dọn dẹp:
 
 ```mermaid
 stateDiagram-v2
@@ -358,12 +409,15 @@ Dọn dẹp chỉ gỡ **đúng những mảnh phiên đó đã đẩy lên** �
 chung với tệp khác. Xoá hẳn một tệp cũng theo nguyên tắc đó: mảnh nào còn tệp
 khác tham chiếu thì giữ nguyên.
 
-Lưu ý: rớt mạng **không** phải là huỷ. Phiên được giữ nguyên để nối lại; chỉ khi
-quá hạn không hoạt động (mặc định 30 phút) bộ quét mới dọn. Xem mục dưới.
+Một phân biệt nhỏ nhưng quan trọng: **rớt mạng không phải là huỷ.** Phiên được
+giữ nguyên để nối lại; chỉ khi quá hạn không hoạt động (mặc định 30 phút) bộ
+quét mới dọn. Lẫn hai thứ này là mỗi cái chớp Wi-Fi lại xoá sạch công sức nửa
+tiếng của người ta.
 
 ### Rớt mạng thì sao?
 
-Bốn chặng, mỗi chặng có cách chịu lỗi riêng:
+Có bốn chặng đường, và cái sai kinh điển là chỉ lo chặng khó nhất rồi bỏ quên
+chặng dễ nhất. Chặng dễ nhất mới là chặng hay đứt nhất:
 
 ```mermaid
 flowchart LR
@@ -381,26 +435,56 @@ flowchart LR
 | 3 · đọc mảnh | Tài khoản hỏng, tham chiếu hết hạn | Hỏi lại tham chiếu rồi đọc lại; vẫn hỏng thì lần lượt thử mọi tài khoản còn hoạt động |
 | 4 · MySQL | Máy chủ CSDL ngắt kết nối nhàn rỗi | Tự kết nối lại một lần rồi chạy lại câu lệnh |
 
-Hai chốt chặn để **nối lại không thể làm hỏng dữ liệu**:
+Đây là chặng 1 nhìn từ giao diện. Ảnh trên là lúc vừa đứt, ảnh dưới là sau khi
+mạng trở lại — không bấm gì cả:
+
+![Rớt mạng rồi nối lại](anh/kt-06-roi-mang-noi-lai.png)
+
+Vài chi tiết đáng để ý trong ảnh, vì mỗi cái là một quyết định thiết kế:
+
+- Thẻ chuyển **vàng**, không phải đỏ. Đỏ nghĩa là chết, vàng nghĩa là đang xoay
+  xở. Người dùng đọc màu trước khi đọc chữ.
+- Nút vẫn là **Huỷ**, không phải dấu ×. Phiên đang thử lại vẫn là phiên đang
+  chạy, nên vẫn phải huỷ được. Huy hiệu bên trái cũng vẫn đếm nó.
+- Nó nối tiếp từ **mảnh 1/8**, không quay về 0. Máy chủ được hỏi "đã nhận tới
+  đâu" rồi trình duyệt cắt tệp lại từ đúng chỗ đó.
+
+Hai chốt chặn để **nối lại không thể làm hỏng dữ liệu** — vì nối lại sai chỗ mà
+không ai phát hiện thì tệp hỏng âm thầm, còn tệ hơn là báo lỗi thẳng:
 
 * **Web:** mỗi lượt PUT khai `X-Upload-Offset`. Lệch với số byte máy chủ đã nhận
-  là **409** kèm vị trí đúng — không bao giờ ghi đè lên nhau.
+  thì nhận ngay **409** kèm vị trí đúng. Không bao giờ có chuyện hai bên tưởng
+  mình đang ở cùng một vị trí mà thật ra lệch nhau vài MB.
 * **WebDAV:** phần gửi lại được băm rồi đối chiếu với tổng kiểm chốt tại đúng
-  điểm đứt. Cùng tên, cùng kích thước nhưng nội dung đã đổi thì trả **409** và
-  bỏ phần dở, chứ không ghép hai bản vào nhau.
+  điểm đứt. Cùng tên cùng cỡ mà nội dung đã đổi thì trả **409** và bỏ phần dở,
+  chứ không ghép Frankenstein hai bản vào nhau.
 
-> **Đã từng sai ở đây.** Khi kết nối bị cắt giữa chừng, `read()` trả 0 y như lúc
-> máy khách gửi xong — WebDAV không phân biệt được nên **lưu tệp cụt thành tệp
-> hoàn chỉnh**: gửi 9,54 MB, cắt ở 4,50 MB, ổ đĩa hiện ra một tệp 4,50 MB trông
-> hoàn toàn bình thường. Nay có hai chốt: `BodyReader::complete()` phải đúng, và
-> số byte nhận được phải bằng `Content-Length` mới được đóng tệp.
+> **Đã từng sai ở đây — và đây là cái sai tui thấy đáng sợ nhất trong cả dự án.**
+>
+> `read()` trả `0` ở hai tình huống hoàn toàn khác nhau: máy khách gửi xong, và
+> kết nối bị cắt ngang. Cùng một giá trị trả về, hai ý nghĩa trái ngược. WebDAV
+> không phân biệt được nên nó **lưu tệp cụt thành tệp hoàn chỉnh**.
+>
+> Số đo lúc bắt được: gửi 9,54 MB, cắt ngang ở 4,50 MB → ổ đĩa hiện ra một tệp
+> 4,50 MB, trạng thái "hoàn tất", nhìn không có gì bất thường. Không lỗi, không
+> cảnh báo. Chỉ tới lúc mở tệp ra mới biết.
+>
+> Nay có hai lớp chặn: `BodyReader::complete()` phải báo đủ, **và** số byte nhận
+> được phải bằng `Content-Length` mới cho đóng tệp. Thà trả 409 để máy khách gửi
+> lại, còn hơn lưu một tệp trông lành mà bên trong mất một nửa.
 
 ---
 
 ## 8. Tầng MTProto
 
 Ứng dụng nói chuyện với Telegram bằng **MTProto 2.0**, tự cài đặt từ đầu, không
-dùng TDLib hay thư viện nào khác.
+TDLib, không thư viện nào.
+
+Có nên tự viết MTProto không? Nếu mục tiêu là ra sản phẩm nhanh thì không. Nhưng
+ràng buộc "một tệp thực thi, giải nén là chạy" thì TDLib không đáp ứng được —
+kéo nó vào là kéo theo cả một cây phụ thuộc. Nên phải tự làm, và phải làm đúng
+tới từng bit, vì Telegram không tha cho lỗi nào ở tầng này: sai một byte trong
+`msg_key` là kết nối bị đóng, không kèm lời giải thích.
 
 ```mermaid
 sequenceDiagram
@@ -462,13 +546,29 @@ danh 4 byte, chính là **CRC32 của chuỗi khai báo sau khi chuẩn hoá**:
 3. Đổi `<` `>` `{` `}` thành khoảng trắng rồi gộp khoảng trắng thừa
 4. CRC32 của chuỗi thu được
 
-Thứ tự hai bước giữa không hoán đổi được: bỏ ngoặc trước thì `Vector<bytes>` biến
-thành hai từ rời và không còn phân biệt được với `tên:bytes` nữa.
+Thứ tự hai bước giữa **không hoán đổi được**, và đây là chỗ tui đã vấp. Bỏ ngoặc
+trước thì `Vector<bytes>` biến thành hai từ rời, không còn cách nào phân biệt với
+`tên:bytes` nữa — hai thứ có quy tắc chuẩn hoá trái ngược.
 
-Quy tắc này đã được đối chiếu với **toàn bộ** schema chính thức: **2510/2511**
-hàm dựng khớp. Ngoại lệ duy nhất là `msg_container` — cùng vài hàm dựng lõi
-MTProto khác — có định danh do đặc tả ấn định cứng chứ không suy ra từ CRC32;
-bộ nạp luôn ưu tiên định danh ghi trong tệp.
+Quy tắc này đã đối chiếu với **toàn bộ** schema chính thức: **2510/2511** hàm
+dựng khớp. Ngoại lệ duy nhất là `msg_container` — cùng vài hàm dựng lõi MTProto
+khác — có định danh do đặc tả ấn định cứng chứ không suy ra từ CRC32; bộ nạp
+luôn ưu tiên định danh ghi trong tệp.
+
+> **Đã từng sai ở đây, và cái sai này tự nó còn viết ra tài liệu sai.**
+>
+> Bản đầu áp bước `bytes`→`string` cho **mọi** chỗ xuất hiện chữ `bytes`, kể cả
+> trong `Vector<bytes>`. Kết quả: 8 hàm dựng có định danh tính ra lệch với định
+> danh khai trong tệp, ứng dụng in cảnh báo mỗi lần khởi động.
+>
+> Chỗ đáng tiếc là phản ứng đầu tiên của tui: tui viết vào tài liệu rằng
+> *"Telegram giữ định danh cũ cho tương thích"*. Nghe hợp lý, và hoàn toàn sai.
+> Lúc chịu ngồi tính CRC32 bằng tay cho từng hàm dựng thì mới thấy 7 trong 8 ca
+> là lỗi chuẩn hoá của chính tui. Chỉ `msg_container` là ấn định cứng thật.
+>
+> Bài học không phải về TL. Là về chuyện **giải thích một cảnh báo bằng giả
+> thuyết dễ chịu thì rẻ hơn là đi kiểm chứng** — và tài liệu sai còn khó sửa hơn
+> mã sai, vì mã thì trình biên dịch cãi lại, còn tài liệu thì không ai cãi.
 
 Nhờ làm theo schema thay vì sinh mã cứng, **nâng layer không cần biên dịch lại**:
 đặt tệp `api.tl` mới vào thư mục `schema/` là xong. Số layer khai với máy chủ tự
@@ -490,8 +590,9 @@ Kiểm tra bất cứ lúc nào:
 
 ## 10. Nhiều tài khoản
 
-Telegram giới hạn tần suất theo từng tài khoản. Dùng nhiều tài khoản trong cùng
-một siêu nhóm vừa chia tải vừa giảm nguy cơ bị chặn.
+Telegram giới hạn tần suất theo **từng tài khoản**. Nên nhiều tài khoản trong
+cùng một siêu nhóm vừa chia tải vừa giảm nguy cơ bị chặn — cùng một lời hứa mà
+mọi hệ thống phân tán đều hứa, và cùng một mớ rắc rối mà chúng đều mang lại.
 
 ```mermaid
 flowchart LR
@@ -693,14 +794,117 @@ Hai chi tiết nhỏ nhưng dễ sai, đã xử lý:
 
 ---
 
-## 13. Kết quả kiểm thử
+## 13. Một tệp thực thi, chạy mọi nơi
+
+Lời hứa của dự án là "giải nén xong chạy được luôn". Giữ được lời hứa đó khó hơn
+tui tưởng.
+
+### Không phụ thuộc thư viện ngoài
+
+Mọi thứ tự viết bằng C++17: máy chủ HTTP, WebDAV, MTProto, mật mã, giải nén
+gzip, phân giải DNS, và cả trình điều khiển MySQL nói thẳng giao thức mạng. Chỉ
+SQLite là mã bên thứ ba, nhúng sẵn dạng amalgamation.
+
+Không phải vì tui thích viết lại bánh xe. Là vì mỗi thư viện thêm vào là một
+dòng `NEEDED` trong tệp ELF, và mỗi dòng đó là một cách để bản build chết trên
+máy người khác.
+
+### Đường dẫn tương đối tính từ chỗ đặt tệp thực thi
+
+`config.json` ghi `data/tuan-telegram-disk.db` thì đường dẫn đó tính từ **thư
+mục chứa tệp thực thi**, không phải thư mục hiện hành. Nhờ vậy cả thư mục mang
+đi USB, chạy từ đâu cũng đúng, và `systemd` khỏi phải khai `WorkingDirectory`
+cho chuẩn.
+
+### Chuyện `GLIBC_2.38 not found`
+
+Đây là chỗ lời hứa "chạy được luôn" bị vỡ, và vỡ ở nơi tui không ngờ tới.
+
+```
+./tuan-telegram-disk: /lib/x86_64-linux-gnu/libc.so.6:
+version `GLIBC_2.38' not found (required by ./tuan-telegram-disk)
+```
+
+Máy dựng có glibc 2.39, VPS thì cũ hơn. Trình biên dịch **tự** thay `sscanf`,
+`strtol`, `strtoll`, `strtoul` bằng biến thể `__isoc23_*` — cần `GLIBC_2.38` —
+rồi kéo thêm `arc4random` cần `GLIBC_2.36`. Không dòng mã nào của tui yêu cầu
+những thứ đó; nó tự xảy ra ở tầng liên kết.
+
+Bực nhất là cơ chế chặn *đã có sẵn*: `CMakeLists.txt` có tuỳ chọn
+`TTD_FULLY_STATIC` từ đầu. Chỉ là `build-linux.sh` đặt mặc định `0`. Nên mọi gói
+phát hành đều là bản liên kết động — trái hẳn với dòng "chạy độc lập" mà chính
+tui viết trong README.
+
+Nay mặc định là liên kết tĩnh hoàn toàn, và có một cổng chặn **đọc thẳng tầng
+ELF** trước khi cho đóng gói:
+
+```bash
+readelf -l  "$BIN" | grep -c INTERP      # phải là 0
+objdump -p  "$BIN" | grep -c NEEDED      # phải là 0
+objdump -T  "$BIN" | grep -c GLIBC_      # phải là 0
+```
+
+> **Đã từng sai ở đây, hai lần liền.**
+>
+> Lần một: bản kiểm đầu tiên tui viết bằng `ldd | grep -q`. Nhưng `ldd` trả **mã
+> thoát 1** với tệp tĩnh ("not a dynamic executable"), gặp `set -o pipefail` là
+> cả phép kiểm sập, và script báo lỗi cho một bản build hoàn toàn đúng. Đọc ELF
+> trực tiếp thì không có cái bẫy đó.
+>
+> Lần hai: cùng loại lỗi, chỗ khác. Tui bọc một lệnh trong `lệnh | tail -2` để
+> in gọn đầu ra, quên rằng đường ống trả mã thoát của **lệnh cuối** — tức của
+> `tail`, luôn thành công. Lệnh thất bại mà script báo là đạt.
+>
+> Bài học chung: **đừng để đường ống ăn mất mã thoát của lệnh mình đang kiểm.**
+> Hoặc dùng `PIPESTATUS`, hoặc bắt mã thoát trước rồi mới lọc đầu ra.
+
+Liên kết tĩnh có một cảnh báo kèm theo:
+
+```
+warning: Using 'getaddrinfo' in statically linked applications requires
+at runtime the shared libraries from the glibc version used for linking
+```
+
+Cảnh báo này vô hại **trong dự án này**, và tui kiểm chứ không đoán:
+`src/tg/dc_config.cpp` chỉ chứa **địa chỉ IP** của các trung tâm dữ liệu
+Telegram, đúng 0 tên miền; còn `dns::resolve()` thoát sớm ngay khi thấy chuỗi IP
+(`if (looksLikeIp(host)) return {host};`) nên `getaddrinfo` không bao giờ được
+gọi trên đường chạy thật. Có sẵn một bộ phân giải DNS tự viết làm đường lùi.
+
+### Bản Windows
+
+Biên dịch chéo bằng mingw-w64 từ Linux. Script soi từng dòng `DLL Name` trong
+`.exe` và chỉ cho qua nếu tất cả đều là DLL có sẵn trong Windows:
+
+```
+IPHLPAPI.DLL   KERNEL32.dll   WS2_32.dll   bcrypt.dll   msvcrt.dll
+```
+
+Không có Visual C++ Redistributable, không có gì phải cài trước.
+
+---
+
+## 14. Kết quả kiểm thử
 
 ### Tự kiểm tra
 
 `./build/ttd_selftest` — **248 phép kiểm tra**, chạy tự động mỗi lần đóng gói;
-thất bại là dừng build. Bao gồm các vector chuẩn của FIPS/RFC cho hàm băm, HMAC,
-PBKDF2, AES; số học số lớn và RSA; quy tắc CRC32 của TL; phân tích `pq`; phân
-tích HTTP; ánh xạ Range; CSDL với tên tiếng Việt; và kế toán khử trùng lặp.
+thất bại là dừng build, không có chế độ "thôi bỏ qua đi". Bao gồm vector chuẩn
+FIPS/RFC cho hàm băm, HMAC, PBKDF2, AES; số học số lớn và RSA; quy tắc CRC32 của
+TL; phân tích `pq`; phân tích HTTP; ánh xạ Range; CSDL với tên tiếng Việt; và kế
+toán khử trùng lặp.
+
+Vài phép kiểm sinh ra từ đúng những lỗi kể ở trên, và chúng có một điểm chung:
+tui đều **gỡ phần vá ra chạy thử để chắc chắn phép kiểm thật sự bắt được lỗi**.
+Phép kiểm không bao giờ đỏ là phép kiểm trang trí.
+
+| Phép kiểm | Sinh ra từ |
+|---|---|
+| Đọc byte thứ 8 của gói `initConnection` xem có đúng `api_id` | `CONNECTION_API_ID_INVALID` |
+| 6 vector CRC32 cho hàm dựng có `Vector<bytes>` | Quy tắc chuẩn hoá `bytes`→`string` bị áp sai chỗ |
+| Chốt tổng kiểm giữa chừng của `Sha256` không phá trạng thái đang băm | Nối lại tệp qua WebDAV |
+| Ghi lại tham chiếu mảnh kèm `account_id` sau khi đổi tài khoản | Tài khoản bị khoá, `readRange` nhận `const` |
+| Lỗi khi ghi vào CSDL đã đóng không được nói nhầm là hết bộ nhớ | `sqlite3_errmsg(nullptr)` trả `"out of memory"` |
 
 ### Kiểm thử đầu-cuối
 
@@ -722,6 +926,17 @@ chuyển MTProto bằng backend lưu nội bộ):
 | Đổi tên thư mục có dấu, đường dẫn con theo đúng | Đạt |
 | Tìm kiếm không phân biệt hoa/thường với chữ có dấu | Đạt |
 | Giao diện trên Chromium thật — không lỗi console | Đạt |
+| **Cắt ngang lượt PUT WebDAV ở 4,50/9,54 MB → không lưu tệp cụt, phiên giữ nguyên** | Đạt |
+| **Gửi lại: nhật ký báo "khớp tổng kiểm — nối tiếp từ 4,50 MB", SHA-256 khớp** | Đạt |
+| **Gửi tệp KHÁC cùng tên cùng cỡ → 409, bỏ phần dở, không ghép lẫn** | Đạt |
+| **Rớt mạng giữa lượt tải 60 MB qua trình duyệt → nối lại, SHA-256 khớp tuyệt đối** | Đạt |
+| **`X-Upload-Offset` đúng → 200; sai → 409 kèm vị trí đúng** | Đạt |
+
+Phép kiểm rớt mạng ở dòng thứ tư làm bằng cách chặn thẳng lượt PUT trong
+Chromium (`route.abort('connectionfailed')`) — đường thử lại trong `web/app.js`
+là đường thật, chỉ có lỗi mạng là dựng. Tệp 60 MB sau khi nối lại cho ra
+SHA-256 `2aabe5af…0292ff`, khớp đúng bản gốc từng byte. Đó cũng là hai ảnh ở
+[mục 7](#7-huỷ-dọn-dẹp-và-rớt-mạng).
 
 ### Đã chạy thật với Telegram
 
@@ -756,7 +971,7 @@ Những phần này **chưa ai chạy thử**, hãy coi là chưa được bảo
 
 ---
 
-## 14. Giới hạn đã biết
+## 15. Giới hạn đã biết
 
 | Giới hạn | Chi tiết |
 |---|---|
@@ -782,13 +997,15 @@ sudo apt install mingw-w64 cmake
 ./build-windows.sh        # → dist/windows-x64/
 ```
 
-Cả hai script đều chạy bộ tự kiểm tra trước khi đóng gói và dừng ngay nếu có
-phép kiểm tra nào thất bại. Script Windows còn soi tệp `.exe` để chắc chắn nó
-chỉ phụ thuộc DLL có sẵn của hệ điều hành (`kernel32`, `msvcrt`, `ws2_32`,
-`iphlpapi`, `bcrypt`).
+Cả hai script chạy bộ tự kiểm tra trước khi đóng gói và dừng ngay nếu có phép
+kiểm nào đỏ. Chúng cũng chạy các cổng chặn ở
+[mục 13](#13-một-tệp-thực-thi-chạy-mọi-nơi) — bản Linux phải không còn dấu vết
+glibc, bản Windows phải chỉ dùng DLL có sẵn. Đừng tắt mấy cổng đó; chúng có mặt
+vì tui đã từng phát hành một bản build chết ngay trên VPS.
 
 Số build tự tăng mỗi lần biên dịch. Nâng phiên bản bằng
-`cmake --build build --target bump_minor`.
+`cmake --build build --target bump_minor`. Máy chạy CI đặt `TTD_AUTO_BUMP=OFF`
+để khỏi làm bẩn cây mã.
 
 ---
 

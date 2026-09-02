@@ -210,6 +210,21 @@ vẫn tải được tệp 100 GB.
 
 Máy quá ít RAM thì đổi **Chế độ đệm** sang `disk` trong Cài đặt.
 
+### Rớt mạng giữa chừng
+
+Cứ để đó, đừng bấm gì. Thẻ tải lên chuyển vàng và tự đếm ngược:
+
+![Mất kết nối rồi tự nối lại](anh/kt-06-roi-mang-noi-lai.png)
+
+Nó thử lại **6 lần**, giãn cách 1 · 2 · 4 · 8 · 16 · 30 giây — tổng khoảng một
+phút, đủ qua một lần rớt Wi-Fi, đổi sóng 4G, hay máy chủ khởi động lại. Mỗi lần
+thử nó hỏi máy chủ "đã nhận tới đâu rồi" rồi cắt tệp tiếp từ đúng chỗ đó, chứ
+không quay về số 0.
+
+Để ý là nút vẫn là **Huỷ** chứ không phải dấu ×: phiên đang thử lại vẫn là phiên
+đang chạy, muốn dừng thì dừng được ngay. Mất mạng lâu hơn một phút thì thẻ mới
+chuyển đỏ, và phần đã tải vẫn được giữ **30 phút** để bạn thử lại.
+
 ---
 
 ## 6. Khi trùng tệp
