@@ -9,6 +9,7 @@
 #include "common/logging.h"
 #include "common/strutil.h"
 #include "common/timeutil.h"
+#include "crypto/hash.h"
 #include "crypto/random.h"
 #include "http/mime.h"
 #include "storage/download_stream.h"
@@ -339,45 +340,141 @@ void registerWebdavRoutes(HttpServer& server, app::App& app) {
                 return;
             }
 
-            storage::UploadInitRequest ur;
-            ur.name = name;
-            ur.targetFolderPath = parent;
-            ur.totalSize = req.contentLength;
-            ur.mimeType = req.header("Content-Type");
-            ur.policy = storage::ConflictPolicy::Replace;
-            ur.ownerId = auth.user.id;
+            // Nối lại sau khi rớt mạng. Máy khách WebDAV (Explorer, Finder,
+            // rclone, davfs2…) không biết gửi tiếp giữa chừng — nó gửi lại cả
+            // tệp từ byte 0. Nhưng phần đắt đỏ là chặng máy chủ → Telegram, nên
+            // ta nhận lại phần đầu qua mạng nội bộ, băm để đối chiếu, rồi chỉ
+            // đẩy lên Telegram phần còn thiếu.
+            std::shared_ptr<storage::UploadSession> session =
+                app.uploads()->claimResumable(auth.user.id, parent, name, req.contentLength);
+            std::string uploadId;
+            uint64_t boQua = 0;      // số byte đầu phải nhận lại rồi bỏ
+            Bytes bamMongDoi;
 
-            storage::UploadInitResult init = app.uploads()->begin(ur);
-            if (!init.ok) {
-                res.setText(init.error, 507);
-                return;
+            if (session) {
+                boQua = session->receivedBytes();
+                bamMongDoi = session->digestSoFar();
+                uploadId = session->id();
+                LOG_INFO(kTag, "Nối lại '%s': đã có %s, nhận lại phần đầu để đối chiếu",
+                         vpath.c_str(), formatBytes(boQua).c_str());
+            } else {
+                storage::UploadInitRequest ur;
+                ur.name = name;
+                ur.targetFolderPath = parent;
+                ur.totalSize = req.contentLength;
+                ur.mimeType = req.header("Content-Type");
+                ur.policy = storage::ConflictPolicy::Replace;
+                ur.ownerId = auth.user.id;
+
+                storage::UploadInitResult init = app.uploads()->begin(ur);
+                if (!init.ok) {
+                    res.setText(init.error, 507);
+                    return;
+                }
+                session = app.uploads()->find(init.uploadId);
+                if (!session) {
+                    res.setText("Không mở được phiên ghi.", 500);
+                    return;
+                }
+                session->claim();
+                uploadId = init.uploadId;
             }
-            auto session = app.uploads()->find(init.uploadId);
-            if (!session) {
-                res.setText("Không mở được phiên ghi.", 500);
-                return;
-            }
+            // Trả quyền dùng phiên dù thoát bằng đường nào.
+            struct TraQuyen {
+                std::shared_ptr<storage::UploadSession> s;
+                ~TraQuyen() { if (s) s->release(); }
+            } traQuyen{session};
 
             uint8_t buffer[256 * 1024];
             std::string writeError;
+            uint64_t daBoQua = 0;
+            crypto::Sha256 bamPhanDau;
+            bool lechNoiDung = false;
+
             while (true) {
                 long n = body.read(buffer, sizeof(buffer));
                 if (n < 0) {
-                    app.uploads()->cancel(init.uploadId, "Kết nối WebDAV bị ngắt");
-                    res.setText("Kết nối bị ngắt giữa chừng.", 400);
+                    // Giữ phiên lại để lượt PUT sau nối tiếp. Chỉ bộ dọn phiên
+                    // bỏ dở (mặc định 30 phút) mới xoá dữ liệu đã đẩy lên.
+                    LOG_WARN(kTag, "Kết nối WebDAV đứt khi đang nhận '%s' — giữ %s để nối lại",
+                             vpath.c_str(), formatBytes(session->receivedBytes()).c_str());
+                    res.setText("Kết nối bị ngắt giữa chừng — gửi lại tệp để nối tiếp.", 409);
                     res.closeConnection = true;
                     return;
                 }
-                if (n == 0) break;
-                if (!session->receive(buffer, static_cast<size_t>(n), writeError)) {
-                    app.uploads()->cancel(init.uploadId, writeError);
+                if (n == 0) {
+                    // read() trả 0 nghĩa là hết luồng — nhưng "hết" có hai kiểu:
+                    // máy khách gửi xong thật, hoặc kết nối bị cắt ngang. Không
+                    // phân biệt thì tệp cụt sẽ được lưu như tệp hoàn chỉnh.
+                    if (!body.complete()) {
+                        LOG_WARN(kTag,
+                                 "Luồng WebDAV kết thúc sớm khi nhận '%s' (%s/%s) — giữ để nối lại",
+                                 vpath.c_str(), formatBytes(session->receivedBytes()).c_str(),
+                                 formatBytes(req.contentLength).c_str());
+                        res.setText("Dữ liệu gửi lên chưa đủ — gửi lại tệp để nối tiếp.", 409);
+                        res.closeConnection = true;
+                        return;
+                    }
+                    break;
+                }
+
+                size_t offset = 0;
+                if (daBoQua < boQua) {
+                    size_t lay = static_cast<size_t>(
+                        std::min<uint64_t>(boQua - daBoQua, static_cast<uint64_t>(n)));
+                    bamPhanDau.update(buffer, lay);
+                    daBoQua += lay;
+                    offset = lay;
+                    if (daBoQua == boQua) {
+                        uint8_t got[32];
+                        bamPhanDau.finish(got);
+                        if (bamMongDoi.size() != 32 ||
+                            std::memcmp(got, bamMongDoi.data(), 32) != 0) {
+                            lechNoiDung = true;
+                            break;
+                        }
+                        LOG_INFO(kTag, "Phần đầu khớp tổng kiểm — nối tiếp từ %s",
+                                 formatBytes(boQua).c_str());
+                    }
+                }
+                if (offset >= static_cast<size_t>(n)) continue;
+                if (!session->receive(buffer + offset, static_cast<size_t>(n) - offset,
+                                      writeError)) {
+                    app.uploads()->cancel(uploadId, writeError);
                     res.setText(writeError, 507);
                     return;
                 }
             }
 
+            if (lechNoiDung) {
+                // Cùng tên, cùng kích thước nhưng nội dung khác — không được
+                // ghép hai bản vào nhau. Bỏ phần dở rồi báo để máy khách gửi lại.
+                LOG_WARN(kTag, "Nội dung '%s' đã đổi so với phiên dở — bỏ phần cũ",
+                         vpath.c_str());
+                app.uploads()->cancel(uploadId, "Nội dung tệp đã thay đổi");
+                res.setText("Nội dung tệp đã thay đổi so với lần gửi dở — hãy gửi lại.", 409);
+                return;
+            }
+            if (daBoQua < boQua) {
+                // Máy khách gửi ít hơn cả phần đã có: không đủ để nối.
+                app.uploads()->cancel(uploadId, "Dữ liệu gửi lại ngắn hơn phần đã nhận");
+                res.setText("Dữ liệu gửi lại không đủ dài để nối tiếp.", 409);
+                return;
+            }
+
+            // Chốt chặn cuối: chỉ đóng tệp khi đã nhận đủ số byte máy khách khai.
+            // Thà báo lỗi để nó gửi lại còn hơn lưu một tệp cụt trông như lành.
+            if (req.contentLength > 0 && session->receivedBytes() != req.contentLength) {
+                LOG_WARN(kTag, "Nhận thiếu '%s': %s/%s — giữ phiên để nối lại", vpath.c_str(),
+                         formatBytes(session->receivedBytes()).c_str(),
+                         formatBytes(req.contentLength).c_str());
+                res.setText("Nhận thiếu dữ liệu — gửi lại tệp để nối tiếp.", 409);
+                res.closeConnection = true;
+                return;
+            }
+
             db::FileEntry entry;
-            if (!app.uploads()->complete(init.uploadId, entry, writeError)) {
+            if (!app.uploads()->complete(uploadId, entry, writeError)) {
                 res.setText(writeError, 500);
                 return;
             }

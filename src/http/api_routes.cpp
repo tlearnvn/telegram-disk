@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cstdlib>
 #include <chrono>
 #include <thread>
 
@@ -754,6 +755,26 @@ void registerApiRoutes(HttpServer& server, app::App& app) {
             return;
         }
 
+        // Nối lại sau khi rớt mạng: trình duyệt gửi kèm X-Upload-Offset để nói
+        // "tôi đang gửi tiếp từ byte thứ N". Nếu N không khớp với số byte máy
+        // chủ đã nhận thì phải từ chối — ghi đè lên thì dữ liệu lệch âm thầm,
+        // mãi tới lúc đối chiếu SHA-256 ở cuối mới lộ ra. Trả 409 kèm vị trí
+        // đúng để trình duyệt cắt lại cho khớp.
+        std::string offsetHeader = req.header("X-Upload-Offset");
+        if (!offsetHeader.empty()) {
+            uint64_t want = session->receivedBytes();
+            uint64_t got = strtoull(offsetHeader.c_str(), nullptr, 10);
+            if (got != want) {
+                Json j = Json::object();
+                j.set("ok", false);
+                j.set("error", "Vị trí gửi tiếp không khớp: máy chủ đã nhận " +
+                                   std::to_string(want) + " byte.");
+                j.set("received", want);
+                res.setJson(j, 409);
+                return;
+            }
+        }
+
         uint8_t buffer[256 * 1024];
         uint64_t received = 0;
         std::string error;
@@ -761,11 +782,18 @@ void registerApiRoutes(HttpServer& server, app::App& app) {
             long n = body.read(buffer, sizeof(buffer));
             if (n < 0) {
                 // Trình duyệt ngắt kết nối giữa chừng — coi như tạm dừng, giữ phiên
-                // để người dùng có thể tiếp tục.
+                // để người dùng có thể tiếp tục. Phần đã đọc được thì đã ghi vào
+                // phiên rồi, nên vị trí gửi tiếp của trình duyệt đã cũ: trả 409
+                // kèm vị trí đúng, cùng mã với lỗi lệch vị trí, để bên kia biết
+                // đây là chuyện nối lại được chứ không phải hỏng hẳn.
                 LOG_WARN(kTag, "[%s] Kết nối tải lên bị ngắt sau %s", id.c_str(),
                          formatBytes(received).c_str());
+                Json j = Json::object();
+                j.set("ok", false);
+                j.set("error", "Kết nối bị ngắt giữa chừng.");
+                j.set("received", session->receivedBytes());
                 res.closeConnection = true;
-                sendError(res, 400, "Kết nối bị ngắt giữa chừng.");
+                res.setJson(j, 409);
                 return;
             }
             if (n == 0) break;

@@ -1014,25 +1014,76 @@ async function taiMotTep(file, chinhSach = 'ask') {
   let offset = 0;
 
   try {
+    let luotHong = 0;   // số lần hỏng liên tiếp của khối hiện tại
     while (offset < file.size) {
       if (theoDoi.huy) throw new Error('Đã huỷ');
       const den = Math.min(offset + buoc, file.size);
       const lat = file.slice(offset, den);
       theoDoi.controller = new AbortController();
 
-      const res = await fetch(`/api/upload/${theoDoi.id}/data`, {
-        method: 'PUT',
-        credentials: 'same-origin',
-        headers: { 'Content-Type': 'application/octet-stream' },
-        body: lat,
-        signal: theoDoi.controller.signal,
-      });
+      let res;
+      try {
+        res = await fetch(`/api/upload/${theoDoi.id}/data`, {
+          method: 'PUT',
+          credentials: 'same-origin',
+          headers: {
+            'Content-Type': 'application/octet-stream',
+            // Nói rõ mình đang gửi tiếp từ đâu. Máy chủ trả 409 nếu lệch,
+            // nên nối lại sai vị trí không thể làm hỏng dữ liệu âm thầm.
+            'X-Upload-Offset': String(offset),
+          },
+          body: lat,
+          signal: theoDoi.controller.signal,
+        });
+      } catch (loiMang) {
+        // Người dùng bấm huỷ cũng ném AbortError — phân biệt bằng cờ huỷ.
+        if (theoDoi.huy) throw new Error('Đã huỷ');
+        res = null;
+        theoDoi.loiCuoi = loiMang.message || 'mất kết nối';
+      }
+
+      // Rớt mạng, máy chủ khởi động lại, hoặc lỗi 5xx tạm thời → chờ rồi hỏi
+      // máy chủ đã nhận tới đâu, cắt lại từ đúng chỗ đó và gửi tiếp. Phiên tải
+      // lên phía máy chủ vẫn sống (mặc định 30 phút không hoạt động mới dọn).
+      const dangHong = !res || res.status === 409 || res.status >= 500;
+      if (dangHong) {
+        if (res && res.status !== 409) {
+          try { const j = await res.json(); if (j && j.error) theoDoi.loiCuoi = j.error; }
+          catch (e) { theoDoi.loiCuoi = `máy chủ trả về ${res.status}`; }
+        }
+        luotHong++;
+        if (luotHong > SO_LAN_THU_LAI) {
+          throw new Error(`${theoDoi.loiCuoi || 'mất kết nối'} — đã thử lại ` +
+                          `${SO_LAN_THU_LAI} lần`);
+        }
+        const cho = Math.min(30000, 1000 * Math.pow(2, luotHong - 1));  // 1·2·4·8·16·30 s
+        theoDoi.trangThai = `Mất kết nối — thử lại lần ${luotHong}/${SO_LAN_THU_LAI}` +
+                            ` sau ${Math.round(cho / 1000)}s`;
+        theoDoi.lop = 'warn';
+        veDanhSachTaiLen();
+        await nguQuaHuy(cho, theoDoi);
+        if (theoDoi.huy) throw new Error('Đã huỷ');
+
+        // Hỏi máy chủ đã nhận được bao nhiêu byte rồi cắt lại từ đó.
+        const tt = await hoiViTriTaiLen(theoDoi.id);
+        if (tt.mat) throw new Error('Phiên tải lên đã hết hạn ở máy chủ');
+        if (tt.chuaBiet) continue;   // mạng vẫn hỏng — chờ tiếp ở vòng sau
+        offset = tt.viTri;
+        theoDoi.daGui = tt.viTri;
+        theoDoi.trangThai = 'Đang tải lên (đã nối lại)';
+        theoDoi.lop = '';
+        veDanhSachTaiLen();
+        continue;
+      }
+
       if (!res.ok) {
+        // 4xx khác 409: lỗi thật (hết hạn phiên, sai quyền…) — thử lại vô ích.
         let msg = `Máy chủ trả về ${res.status}`;
         try { const j = await res.json(); if (j && j.error) msg = j.error; } catch (e) {}
         throw new Error(msg);
       }
       const kq = await res.json();
+      luotHong = 0;
       offset = den;
       theoDoi.daGui = kq.received || offset;
       theoDoi.taiKhoan = kq.account || '';
@@ -1120,6 +1171,38 @@ function hopThoaiTrungLap(file, duplicates) {
 // ở lại tới khi người dùng tự đóng, vì đó là thông tin cần đọc.
 const GIU_THE_XONG_MS = 6000;
 
+// Số lần thử lại một khối trước khi chịu thua. Sáu lần với giãn cách 1·2·4·8·16·30
+// giây là khoảng một phút — đủ qua một lần rớt Wi-Fi, đổi sóng 4G, hay máy chủ
+// khởi động lại, mà không treo mãi khi mạng chết hẳn.
+const SO_LAN_THU_LAI = 6;
+
+// Ngủ nhưng tỉnh ngay nếu người dùng bấm huỷ giữa chừng.
+function nguQuaHuy(ms, theoDoi) {
+  return new Promise((resolve) => {
+    const buoc = 200;
+    let daCho = 0;
+    const dem = setInterval(() => {
+      daCho += buoc;
+      if (theoDoi.huy || daCho >= ms) { clearInterval(dem); resolve(); }
+    }, buoc);
+  });
+}
+
+// Hỏi máy chủ đã nhận được bao nhiêu byte của phiên này. Phải phân biệt rõ ba
+// tình huống: biết được vị trí, phiên đã mất hẳn (thử lại vô ích), và chưa hỏi
+// được vì mạng vẫn hỏng (phải thử lại tiếp).
+async function hoiViTriTaiLen(id) {
+  try {
+    const res = await fetch(`/api/upload/${id}`, { credentials: 'same-origin' });
+    if (res.status === 404) return { mat: true };
+    if (!res.ok) return { chuaBiet: true };
+    const j = await res.json();
+    return { viTri: Number(j.received) || 0 };
+  } catch (e) {
+    return { chuaBiet: true };   // vẫn chưa có mạng
+  }
+}
+
 function henGoThe(theoDoi, cho = GIU_THE_XONG_MS) {
   if (theoDoi.hengio) clearTimeout(theoDoi.hengio);
   theoDoi.hengio = setTimeout(() => {
@@ -1134,9 +1217,13 @@ function veDanhSachTaiLen() {
   $('#tai-len-trong').hidden = list.length > 0;
   box.innerHTML = '';
 
+  // Thẻ đang đếm ngược để thử lại ('warn') vẫn là phiên đang chạy: phải tính
+  // vào huy hiệu và phải cho bấm Huỷ, chứ không phải nút × dọn thẻ.
+  const dangHoatDong = (t) => !t.lop || t.lop === 'warn';
+
   let dangChay = 0;
   for (const t of list) {
-    if (!t.lop) dangChay++;
+    if (dangHoatDong(t)) dangChay++;
     const pct = t.tong ? Math.min(100, (t.daGui / t.tong) * 100) : 0;
     const giay = (Date.now() - t.batDau) / 1000;
     const toc = giay > 0.4 ? t.daGui / giay : 0;
@@ -1147,7 +1234,7 @@ function veDanhSachTaiLen() {
         el('span', {}, BIEU_TUONG.other),
         el('span', { class: 'upload-name', text: t.ten, title: t.ten }),
         el('span', { class: 'upload-state ' + (t.lop || ''), text: t.trangThai }),
-        !t.lop
+        dangHoatDong(t)
           ? el('button', { class: 'btn btn-ghost danger', onclick: () => huyTaiLen(t.id) }, 'Huỷ')
           : el('button', {
               class: 'btn btn-ghost', title: 'Bỏ khỏi danh sách',
@@ -1250,7 +1337,10 @@ async function dongBoTaiLen() {
       henGoThe(t);
     }
     if (S.view === 'tai-len') veDanhSachTaiLen();
-    const dangChay = Array.from(S.phienTaiLen.values()).filter((t) => !t.lop).length;
+    // Thẻ 'warn' đang đếm ngược thử lại vẫn tính là đang chạy — giống hệt
+    // cách veDanhSachTaiLen() đếm, để huy hiệu không nhấp nháy lệch nhau.
+    const dangChay = Array.from(S.phienTaiLen.values())
+                          .filter((t) => !t.lop || t.lop === 'warn').length;
     const badge = $('#badge-tai-len');
     badge.hidden = dangChay === 0;
     badge.textContent = String(dangChay);

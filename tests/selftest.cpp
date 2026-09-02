@@ -157,6 +157,25 @@ void testBam() {
              "a9993e364706816aba3e25717850c26c9cd0d89d", "SHA-1");
     kiemBang(toHex(Sha256::hash(std::string("abc"))),
              "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad", "SHA-256");
+
+    // Nối lại tệp qua WebDAV dựa vào việc CHỐT được tổng kiểm của phần đã nhận
+    // mà không phá trạng thái băm đang chạy — tức Sha256 phải sao chép được và
+    // finish() trên bản sao không đụng tới bản gốc. Nếu sau này ai thêm con trỏ
+    // hay bộ nhớ động vào Sha256 thì phép kiểm này sẽ gãy, đúng như mong muốn.
+    {
+        Sha256 dangChay;
+        dangChay.update(std::string("ab"));
+        Sha256 chot = dangChay;                 // chốt giữa chừng
+        uint8_t d1[32];
+        chot.finish(d1);
+        kiemBang(toHex(Bytes(d1, d1 + 32)), toHex(Sha256::hash(std::string("ab"))),
+                 "chốt băm giữa chừng đúng bằng băm của phần đã nhận");
+        dangChay.update(std::string("c"));      // bản gốc phải còn nguyên vẹn
+        uint8_t d2[32];
+        dangChay.finish(d2);
+        kiemBang(toHex(Bytes(d2, d2 + 32)), toHex(Sha256::hash(std::string("abc"))),
+                 "chốt bản sao không phá trạng thái băm đang chạy");
+    }
     kiemBang(toHex(Sha512::hash(toBytes("abc"))).substr(0, 32),
              "ddaf35a193617abacc417349ae204131", "SHA-512");
     kiemBang(toHex(Md5::hash(toBytes("abc"))), "900150983cd24fb0d6963f7d28e17f72", "MD5");

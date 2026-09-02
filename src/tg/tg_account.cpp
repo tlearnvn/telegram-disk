@@ -18,6 +18,11 @@ namespace tg {
 namespace {
 constexpr const char* kTag = "tg.acc";
 constexpr uint32_t kDownloadBlock = 1024 * 1024;  // 1 MB — giới hạn của upload.getFile
+// Số lần thử một lời gọi API trước khi chịu thua (rớt mạng, hết giờ chờ…).
+constexpr int kSoLanThuGoiApi = 3;
+// FLOOD_WAIT tới ngần này giây thì tự chờ rồi làm lại; lâu hơn mới trả lỗi lên
+// trên để nhóm tài khoản đổi sang tài khoản khác.
+constexpr int kFloodWaitTuChoToiDaGiay = 30;
 
 bool isMigrationError(const std::string& msg, int& dcOut) {
     static const char* kPrefixes[] = {"FILE_MIGRATE_", "NETWORK_MIGRATE_", "PHONE_MIGRATE_",
@@ -221,10 +226,19 @@ InvokeResult TgAccount::invoke(const TlValue& request, int dcId, int timeoutMs) 
         return r;
     }
 
-    for (int attempt = 0; attempt < 3; ++attempt) {
+    for (int attempt = 0; attempt < kSoLanThuGoiApi; ++attempt) {
         std::string error;
         MtprotoSession* s = session(dcId, error);
         if (!s) {
+            // Không mở được phiên thường là do mạng chập chờn (DNS, TCP bị từ
+            // chối, Telegram đang trục trặc). Thử lại như mọi lỗi mạng khác
+            // thay vì bỏ cuộc ngay từ lần đầu.
+            if (attempt + 1 < kSoLanThuGoiApi) {
+                LOG_DEBUG(kTag, "[%s] Chưa mở được phiên DC%d (%s), thử lại",
+                          config_.label.c_str(), dcId, error.c_str());
+                std::this_thread::sleep_for(std::chrono::milliseconds(500 * (attempt + 1)));
+                continue;
+            }
             InvokeResult r;
             r.localError = error;
             setLastError(error);
@@ -242,6 +256,18 @@ InvokeResult TgAccount::invoke(const TlValue& request, int dcId, int timeoutMs) 
             }
             if (startsWith(res.error.message, "FLOOD_WAIT_")) {
                 int seconds = res.error.value;
+                // FLOOD_WAIT ngắn thì chờ rồi làm lại: bỏ cuộc ngay sẽ giết cả
+                // phiên tải lên tệp lớn chạy hàng giờ chỉ vì Telegram bảo nghỉ
+                // vài giây. Chờ dài mới trả về để tầng trên đổi tài khoản khác.
+                if (seconds > 0 && seconds <= kFloodWaitTuChoToiDaGiay &&
+                    attempt + 1 < kSoLanThuGoiApi) {
+                    LOG_WARN(kTag, "[%s] Telegram bảo chờ %d giây — chờ rồi làm lại",
+                             config_.label.c_str(), seconds);
+                    setLastError("Đang chờ " + std::to_string(seconds) + " giây theo yêu cầu"
+                                 " của Telegram");
+                    std::this_thread::sleep_for(std::chrono::seconds(seconds + 1));
+                    continue;
+                }
                 floodWaitUntil_.store(nowUnix() + seconds);
                 LOG_WARN(kTag, "[%s] Telegram giới hạn tần suất %d giây", config_.label.c_str(),
                          seconds);
@@ -265,7 +291,8 @@ InvokeResult TgAccount::invoke(const TlValue& request, int dcId, int timeoutMs) 
             auto it = sessions_.find(dcId);
             if (it != sessions_.end()) it->second->disconnect();
         }
-        if (attempt + 1 < 3) std::this_thread::sleep_for(std::chrono::milliseconds(500));
+        if (attempt + 1 < kSoLanThuGoiApi)
+            std::this_thread::sleep_for(std::chrono::milliseconds(500 * (attempt + 1)));
         else {
             setLastError(res.localError);
             return res;

@@ -387,6 +387,27 @@ vào siêu nhóm ở bước 2, rồi bấm **Kết nối lại tất cả**. �
 tài khoản này và dùng tài khoản khác trong lúc chờ, nên việc tải lên không bị
 gián đoạn.
 
+### Đang tải lên mà rớt mạng thì sao?
+
+**Không phải làm lại từ đầu.** Máy chủ giữ nguyên phần đã nhận, chỉ dọn khi quá
+**30 phút** không thấy gửi tiếp (đổi được ở Cài đặt).
+
+**Tải lên bằng giao diện web:** tự thử lại **6 lần**, giãn cách 1 · 2 · 4 · 8 ·
+16 · 30 giây — tổng khoảng một phút, đủ qua một lần rớt Wi-Fi, đổi sóng 4G, hay
+máy chủ khởi động lại. Thẻ tải lên chuyển vàng và đếm ngược *"Mất kết nối — thử
+lại lần 2/6 sau 2s"*, rồi tự nối tiếp từ đúng chỗ đã dừng. Bạn không phải bấm gì.
+Mất mạng lâu hơn thì thẻ mới chuyển đỏ.
+
+**Tải lên bằng WebDAV:** Explorer, Finder, rclone, davfs2 đều không biết gửi tiếp
+giữa chừng — chúng gửi lại cả tệp từ đầu. Máy chủ xử lý giúp: nó nhận lại phần
+đầu qua mạng nội bộ, băm để đối chiếu, rồi **chỉ đẩy lên Telegram phần còn
+thiếu**. Chặng nội bộ thường nhanh gấp nhiều lần chặng đi Telegram, nên gửi lại
+một tệp 20 GB đứt ở 90% chỉ tốn thêm ít phút thay vì vài giờ.
+
+Nếu bạn sửa tệp giữa hai lần gửi, máy chủ phát hiện phần đầu không khớp và báo
+*"Nội dung tệp đã thay đổi so với lần gửi dở — hãy gửi lại"*; gửi lại lần nữa là
+nó chạy sạch từ đầu. Nó **không bao giờ** ghép hai bản khác nhau vào một tệp.
+
 ### Một tài khoản bị Telegram khoá — tệp có mất không?
 
 **Không mất.** Tệp nằm trong **siêu nhóm**, không nằm trong tài khoản. Tài khoản

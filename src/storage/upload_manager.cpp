@@ -72,6 +72,26 @@ UploadSession::~UploadSession() {
     if (state_ != UploadState::Completed && !uploaded_.empty()) rollback();
 }
 
+Bytes UploadSession::digestSoFar() const {
+    std::lock_guard<std::mutex> lk(mu_);
+    // Sha256 chỉ chứa số và mảng cố định nên sao chép được: chốt bản sao để lấy
+    // tổng kiểm của phần đã nhận mà không phá trạng thái băm đang chạy.
+    crypto::Sha256 banSao = hasher_;
+    uint8_t out[32];
+    banSao.finish(out);
+    return Bytes(out, out + 32);
+}
+
+uint64_t UploadSession::totalSize() const {
+    std::lock_guard<std::mutex> lk(mu_);
+    return totalSize_;
+}
+
+std::string UploadSession::targetKey() const {
+    std::lock_guard<std::mutex> lk(mu_);
+    return normalizeVirtualPath(targetFolderPath_ + "/" + name_);
+}
+
 UploadProgress UploadSession::progress() const {
     std::lock_guard<std::mutex> lk(mu_);
     UploadProgress p;
@@ -677,6 +697,28 @@ std::shared_ptr<UploadSession> UploadManager::find(const std::string& id) {
     std::lock_guard<std::mutex> lk(mu_);
     auto it = sessions_.find(id);
     return it == sessions_.end() ? nullptr : it->second;
+}
+
+std::shared_ptr<UploadSession> UploadManager::claimResumable(int ownerId,
+                                                             const std::string& folder,
+                                                             const std::string& name,
+                                                             uint64_t totalSize) {
+    if (totalSize == 0) return nullptr;
+    std::string key = normalizeVirtualPath(folder + "/" + name);
+    std::lock_guard<std::mutex> lk(mu_);
+    for (auto& kv : sessions_) {
+        auto& s = kv.second;
+        if (!s || s->cancelled()) continue;
+        UploadProgress p = s->progress();
+        if (p.ownerId != ownerId) continue;
+        if (p.state != UploadState::Receiving) continue;   // chỉ phiên đang dở
+        if (p.receivedBytes == 0 || p.receivedBytes >= totalSize) continue;
+        if (s->totalSize() != totalSize) continue;
+        if (s->targetKey() != key) continue;
+        if (!s->claim()) continue;   // một lượt PUT khác đang dùng
+        return s;
+    }
+    return nullptr;
 }
 
 bool UploadManager::complete(const std::string& id, db::FileEntry& out, std::string& error) {

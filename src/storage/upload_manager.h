@@ -95,6 +95,17 @@ public:
     uint64_t receivedBytes() const { return receivedBytes_.load(); }
     int64_t lastActivity() const { return lastActivity_.load(); }
 
+    // SHA-256 của đúng receivedBytes() byte đã nhận. Dùng để nối lại qua WebDAV:
+    // máy khách gửi lại từ đầu, ta băm phần trùng rồi đối chiếu, khớp mới nối.
+    Bytes digestSoFar() const;
+    // Thông tin để nhận ra phiên bỏ dở của cùng một tệp.
+    uint64_t totalSize() const;
+    std::string targetKey() const;   // "<thư mục>/<tên>"
+
+    // Giành quyền dùng phiên: chống hai lượt PUT cùng lúc giẫm lên nhau.
+    bool claim() { bool cho = false; return busy_.compare_exchange_strong(cho, true); }
+    void release() { busy_.store(false); }
+
 private:
     friend class UploadManager;
 
@@ -133,6 +144,7 @@ private:
     std::atomic<uint64_t> receivedBytes_{0};
     std::atomic<uint64_t> storedBytes_{0};
     std::atomic<bool> cancelled_{false};
+    std::atomic<bool> busy_{false};
     std::atomic<int64_t> lastActivity_{0};
     UploadState state_ = UploadState::Preparing;
     std::string message_;
@@ -173,6 +185,11 @@ public:
 
     UploadInitResult begin(const UploadInitRequest& req);
     std::shared_ptr<UploadSession> find(const std::string& id);
+    // Tìm phiên bỏ dở của đúng tệp này (cùng chủ, cùng đường dẫn, cùng kích
+    // thước) để nối tiếp thay vì tải lại từ đầu. Trả về phiên đã được giành
+    // quyền — người gọi phải release() khi xong.
+    std::shared_ptr<UploadSession> claimResumable(int ownerId, const std::string& folder,
+                                                  const std::string& name, uint64_t totalSize);
     bool complete(const std::string& id, db::FileEntry& out, std::string& error);
     bool cancel(const std::string& id, const std::string& reason);
     std::vector<UploadProgress> activeUploads(int ownerId) const;

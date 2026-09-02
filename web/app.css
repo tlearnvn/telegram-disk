@@ -644,6 +644,8 @@ html[data-theme="dark"] .ft-presentation { background: #32211a; }
 .upload-state.done { background: var(--xanh-la-nhat); color: var(--xanh-la); }
 .upload-state.err  { background: var(--do-nhat); color: var(--do); }
 .upload-state.cancel { background: var(--nen-3); color: var(--chu-nhat); }
+/* Mất kết nối, đang đếm ngược để thử lại — chưa hỏng hẳn nên không tô đỏ. */
+.upload-state.warn { background: var(--vang-nhat); color: var(--vang); }
 .progress { height: 8px; border-radius: 999px; background: var(--nen-3); overflow: hidden; }
 .progress i {
   display: block; height: 100%; border-radius: 999px;
@@ -652,6 +654,7 @@ html[data-theme="dark"] .ft-presentation { background: #32211a; }
 }
 .progress.err i { background: var(--do); }
 .progress.done i { background: var(--xanh-la); }
+.progress.warn i { background: var(--vang); }
 .upload-meta { display: flex; justify-content: space-between; gap: 12px;
   margin-top: 7px; font-size: 12px; color: var(--chu-nhat); flex-wrap: wrap; }
 

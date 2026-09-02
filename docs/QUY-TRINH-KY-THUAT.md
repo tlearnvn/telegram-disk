@@ -358,6 +358,43 @@ Dọn dẹp chỉ gỡ **đúng những mảnh phiên đó đã đẩy lên** �
 chung với tệp khác. Xoá hẳn một tệp cũng theo nguyên tắc đó: mảnh nào còn tệp
 khác tham chiếu thì giữ nguyên.
 
+Lưu ý: rớt mạng **không** phải là huỷ. Phiên được giữ nguyên để nối lại; chỉ khi
+quá hạn không hoạt động (mặc định 30 phút) bộ quét mới dọn. Xem mục dưới.
+
+### Rớt mạng thì sao?
+
+Bốn chặng, mỗi chặng có cách chịu lỗi riêng:
+
+```mermaid
+flowchart LR
+    A["Trình duyệt<br/>hoặc máy khách WebDAV"] -->|1| B["Máy chủ"]
+    B -->|2| C["MTProto"]
+    C -->|3| D["Telegram"]
+    B -->|4| E[("Cơ sở dữ liệu")]
+```
+
+| Chặng | Khi đứt | Cách xử lý |
+|---|---|---|
+| 1 · trình duyệt → máy chủ | Wi-Fi chớp, máy ngủ, máy chủ khởi động lại | Thử lại 6 lần, giãn cách 1·2·4·8·16·30 giây; mỗi lần hỏi lại máy chủ đã nhận tới đâu rồi cắt tiếp từ đó |
+| 1' · WebDAV → máy chủ | Máy khách WebDAV không biết gửi tiếp | Máy chủ **giữ phiên dở**; lượt PUT sau gửi lại từ đầu, máy chủ băm phần trùng để đối chiếu rồi chỉ đẩy lên Telegram phần còn thiếu |
+| 2–3 · máy chủ → Telegram | Đứt TCP, hết giờ chờ, đổi trung tâm dữ liệu | Thử lại 3 lượt, giãn cách 0,5·1 giây, mở lại phiên mỗi lượt; tự theo `*_MIGRATE`; `FLOOD_WAIT` ≤ 30 giây thì chờ rồi làm lại |
+| 3 · đọc mảnh | Tài khoản hỏng, tham chiếu hết hạn | Hỏi lại tham chiếu rồi đọc lại; vẫn hỏng thì lần lượt thử mọi tài khoản còn hoạt động |
+| 4 · MySQL | Máy chủ CSDL ngắt kết nối nhàn rỗi | Tự kết nối lại một lần rồi chạy lại câu lệnh |
+
+Hai chốt chặn để **nối lại không thể làm hỏng dữ liệu**:
+
+* **Web:** mỗi lượt PUT khai `X-Upload-Offset`. Lệch với số byte máy chủ đã nhận
+  là **409** kèm vị trí đúng — không bao giờ ghi đè lên nhau.
+* **WebDAV:** phần gửi lại được băm rồi đối chiếu với tổng kiểm chốt tại đúng
+  điểm đứt. Cùng tên, cùng kích thước nhưng nội dung đã đổi thì trả **409** và
+  bỏ phần dở, chứ không ghép hai bản vào nhau.
+
+> **Đã từng sai ở đây.** Khi kết nối bị cắt giữa chừng, `read()` trả 0 y như lúc
+> máy khách gửi xong — WebDAV không phân biệt được nên **lưu tệp cụt thành tệp
+> hoàn chỉnh**: gửi 9,54 MB, cắt ở 4,50 MB, ổ đĩa hiện ra một tệp 4,50 MB trông
+> hoàn toàn bình thường. Nay có hai chốt: `BodyReader::complete()` phải đúng, và
+> số byte nhận được phải bằng `Content-Length` mới được đóng tệp.
+
 ---
 
 ## 8. Tầng MTProto
@@ -660,7 +697,7 @@ Hai chi tiết nhỏ nhưng dễ sai, đã xử lý:
 
 ### Tự kiểm tra
 
-`./build/ttd_selftest` — **246 phép kiểm tra**, chạy tự động mỗi lần đóng gói;
+`./build/ttd_selftest` — **248 phép kiểm tra**, chạy tự động mỗi lần đóng gói;
 thất bại là dừng build. Bao gồm các vector chuẩn của FIPS/RFC cho hàm băm, HMAC,
 PBKDF2, AES; số học số lớn và RSA; quy tắc CRC32 của TL; phân tích `pq`; phân
 tích HTTP; ánh xạ Range; CSDL với tên tiếng Việt; và kế toán khử trùng lặp.
