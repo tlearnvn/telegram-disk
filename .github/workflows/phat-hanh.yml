@@ -137,6 +137,23 @@ jobs:
           } > NOTE.md
           cat NOTE.md
 
+      # Chạy lại cùng một thẻ phải ra kết quả sạch, không phải báo "đã tồn tại"
+      # rồi bỏ dở. Cần thiết khi dựng lại một bản phát hành, hoặc khi thẻ cũ
+      # đang trỏ vào commit không còn nằm trong lịch sử.
+      - name: Gỡ bản phát hành và thẻ trùng tên nếu có
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          THE="${{ steps.ver.outputs.the }}"
+          if gh release view "$THE" >/dev/null 2>&1; then
+            echo "Đã có bản phát hành $THE — gỡ đi để tạo lại."
+            gh release delete "$THE" --yes --cleanup-tag || gh release delete "$THE" --yes
+          fi
+          if git ls-remote --exit-code --tags origin "refs/tags/$THE" >/dev/null 2>&1; then
+            echo "Thẻ $THE vẫn còn trên máy chủ — xoá."
+            git push origin ":refs/tags/$THE"
+          fi
+
       - name: Tạo bản phát hành và đính kèm gói
         env:
           GH_TOKEN: ${{ github.token }}
