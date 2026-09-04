@@ -951,6 +951,23 @@ void testLoiBaoCho() {
     // Có định danh mà không có số thì vẫn là lỗi chờ, chỉ là không biết chờ bao lâu.
     kiem(storage::laLoiTamThoi("420 FLOOD_WAIT", giay) && giay == 0,
          "thiếu số giây vẫn nhận là lỗi chờ, giây trả về 0");
+
+    // Lỗi NỘI BỘ của Telegram (mã 500) cũng là tạm thời — gửi lại là xong.
+    // Đúng chuỗi gặp thật khi tải tệp 58 GB, làm mất 22 mảnh đã đẩy lên.
+    kiem(storage::laLoiTamThoi(
+             "Tải phần 3059/3400 thất bại: Lỗi máy chủ: 500 RPC_CALL_FAIL", giay),
+         "nhận ra RPC_CALL_FAIL là lỗi tạm thời");
+    kiem(storage::laLoiTamThoi("500 RPC_MCGET_FAIL", giay), "nhận ra RPC_MCGET_FAIL");
+    kiem(storage::laLoiTamThoi("500 INTERNAL_SERVER_ERROR", giay),
+         "nhận ra INTERNAL_SERVER_ERROR");
+    kiem(storage::laLoiTamThoi("500 WORKER_BUSY_TOO_LONG_RETRY", giay),
+         "nhận ra WORKER_BUSY_TOO_LONG_RETRY");
+
+    // Vẫn phải phân biệt được với lỗi thật sự vĩnh viễn.
+    kiem(!storage::laLoiTamThoi("400 FILE_PARTS_INVALID", giay),
+         "FILE_PARTS_INVALID không phải lỗi tạm thời");
+    kiem(!storage::laLoiTamThoi("403 CHAT_WRITE_FORBIDDEN", giay),
+         "CHAT_WRITE_FORBIDDEN không phải lỗi tạm thời");
 }
 
 // ---------------------------------------------------------------------------

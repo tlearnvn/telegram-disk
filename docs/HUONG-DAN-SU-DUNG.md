@@ -474,6 +474,44 @@ Muốn đỡ gặp thì: thêm nhiều tài khoản Telegram để chia tải, h
 > Bản trước bản này báo `507 Insufficient Storage` rồi huỷ cả lượt tải — đó là
 > lỗi của ứng dụng, không phải máy chủ hết chỗ. Đã sửa.
 
+### `500 RPC_CALL_FAIL` — và nhật ký ghi "Dọn N mảnh đã tải lên"
+
+Nhật ký trông như thế này:
+
+```
+Dọn 22 mảnh đã tải lên
+Đã huỷ: Tải phần 3059/3400 thất bại: Lỗi máy chủ: 500 RPC_CALL_FAIL
+```
+
+`RPC_CALL_FAIL` là **lỗi nội bộ của Telegram** — máy chủ họ hỏng, không phải máy
+chủ của bạn sai gì. Chuyện này xảy ra, nhất là với tệp rất lớn tải hàng giờ.
+
+Cái sai nằm ở dòng đầu: ứng dụng coi lỗi đó là vĩnh viễn nên **xoá sạch những
+mảnh đã tải lên**. Với tệp 58 GB đã đi được 22 mảnh, đó là mất trắng khoảng
+36 GB vì Telegram hắt hơi đúng một cái.
+
+Từ bản này:
+
+- Gặp lỗi mã 500, ứng dụng **tự gửi lại** 5 lần, giãn cách 1·2·4·8·16 giây.
+- Nếu vẫn không được, phần đã tải lên **được giữ nguyên** — gửi lại tệp là nối
+  tiếp từ chỗ dừng, không đẩy lại từ đầu.
+- Không còn đường nào xoá mảnh ngay khi gặp lỗi ghi. Chỉ khi phiên bỏ dở quá
+  30 phút không ai gửi tiếp thì bộ dọn rác mới thu hồi.
+
+**Một điều nên biết về cỡ mảnh.** Một mảnh không có điểm nối lại ở giữa: hỏng
+thì phải đẩy lại cả mảnh. Nên cỡ mảnh chính là "bán kính thiệt hại" mỗi lần
+Telegram hắt hơi:
+
+| Cỡ mảnh | Tệp 58 GB | Hỏng một mảnh thì đẩy lại |
+|---|---|---|
+| 1,66 GB | 36 mảnh | tới **1,66 GB** |
+| 512 MB | 117 mảnh | tới 512 MB |
+| 128 MB | 466 mảnh | tới 128 MB |
+
+Mảnh to thì ít tin nhắn hơn, danh sách gọn hơn. Mảnh nhỏ thì mỗi lần hỏng rẻ
+hơn nhiều. Đang tải tệp hàng chục GB trên đường mạng không thật ổn định thì nên
+hạ **Cỡ mảnh** trong Cài đặt xuống 256–512 MB.
+
 ### `FLOOD_WAIT`
 
 Telegram bắt chờ vì gửi quá nhanh. Ứng dụng tự chờ rồi thử lại. Bị thường xuyên

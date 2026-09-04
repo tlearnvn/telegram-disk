@@ -60,6 +60,15 @@ const char* uploadStateNameVi(UploadState s) {
 
 bool laLoiTamThoi(const std::string& error, int& giayOut) {
     giayOut = 0;
+    // Lỗi nội bộ của Telegram (mã 500): máy chủ tự hỏng, gửi lại là xong. Không
+    // kèm số giây nên để mặc cho tầng trên chọn quãng nghỉ.
+    static const char* kMayChuHong[] = {"RPC_CALL_FAIL", "RPC_MCGET_FAIL",
+                                        "INTERNAL_SERVER_ERROR", "WORKER_BUSY_TOO_LONG_RETRY",
+                                        "MSG_WAIT_FAILED", "MSGID_DECREASE_RETRY",
+                                        "Telegram lỗi nội bộ"};
+    for (const char* d : kMayChuHong) {
+        if (error.find(d) != std::string::npos) return true;
+    }
     static const char* kDinhDanh[] = {"FLOOD_PREMIUM_WAIT_", "FLOOD_WAIT_", "SLOWMODE_WAIT_",
                                       "TAKEOUT_INIT_DELAY_", "FLOOD_PREMIUM_WAIT",
                                       "FLOOD_WAIT"};

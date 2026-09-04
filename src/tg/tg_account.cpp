@@ -26,6 +26,8 @@ constexpr int kChoToiDaGiay = 60;
 // Tổng thời gian được phép nằm chờ trong MỘT lời gọi. Chặn cái bẫy "mỗi lần chờ
 // đều ngắn nhưng chờ mãi không hết".
 constexpr int kTongChoToiDaGiay = 180;
+// Số lần gửi lại khi Telegram trả lỗi nội bộ (mã 500), giãn cách 1·2·4·8·16 giây.
+constexpr int kSoLanThuMayChuHong = 5;
 
 bool isMigrationError(const std::string& msg, int& dcOut) {
     static const char* kPrefixes[] = {"FILE_MIGRATE_", "NETWORK_MIGRATE_", "PHONE_MIGRATE_",
@@ -57,6 +59,28 @@ bool laLoiBaoCho(const RpcError& err, int& giayOut) {
     if (!hopLe || err.value <= 0) return false;
     giayOut = err.value;
     return true;
+}
+
+// Lỗi NỘI BỘ của Telegram: máy chủ tự hỏng, không phải mình gọi sai. Dấu hiệu
+// là **mã lỗi 500**, ví dụ RPC_CALL_FAIL / RPC_MCGET_FAIL / INTERNAL_SERVER_ERROR.
+// Cách xử lý đúng là gửi lại đúng yêu cầu đó sau một quãng nghỉ — bỏ cuộc ngay
+// là ném đi công sức của cả phiên chỉ vì một lần Telegram hắt hơi.
+//
+// Trừ vài lỗi 500 mà gửi lại không giúp được gì: AUTH_RESTART đòi làm lại từ
+// đầu quy trình đăng nhập, còn PERSISTENT_TIMESTAMP_* thuộc luồng cập nhật.
+bool laLoiMayChuHong(const RpcError& err) {
+    static const char* kKhongThuLai[] = {"AUTH_RESTART", "PERSISTENT_TIMESTAMP_"};
+    for (const char* p : kKhongThuLai) {
+        if (startsWith(err.message, p)) return false;
+    }
+    if (err.code == 500) return true;
+    static const char* kTienTo[] = {"RPC_CALL_FAIL", "RPC_MCGET_FAIL", "INTERNAL_SERVER_ERROR",
+                                    "WORKER_BUSY_TOO_LONG_RETRY", "MSG_WAIT_FAILED",
+                                    "MSGID_DECREASE_RETRY"};
+    for (const char* p : kTienTo) {
+        if (startsWith(err.message, p)) return true;
+    }
+    return false;
 }
 }  // namespace
 
@@ -249,7 +273,8 @@ InvokeResult TgAccount::invoke(const TlValue& request, int dcId, int timeoutMs) 
         return r;
     }
 
-    int daChoGiay = 0;   // tổng thời gian đã nằm chờ theo yêu cầu của Telegram
+    int daChoGiay = 0;        // tổng thời gian đã nằm chờ theo yêu cầu của Telegram
+    int soLanMayChuHong = 0;  // số lần đã gửi lại vì Telegram lỗi nội bộ
     for (int attempt = 0; attempt < kSoLanThuGoiApi; ++attempt) {
         std::string error;
         MtprotoSession* s = session(dcId, error);
@@ -299,6 +324,27 @@ InvokeResult TgAccount::invoke(const TlValue& request, int dcId, int timeoutMs) 
                 LOG_WARN(kTag, "[%s] Giới hạn tần suất %d giây, quá sức chờ — nhường tài khoản khác",
                          config_.label.c_str(), giayCho);
                 setLastError("Bị giới hạn tần suất " + std::to_string(giayCho) + " giây");
+                return res;
+            }
+            if (laLoiMayChuHong(res.error)) {
+                // Máy chủ Telegram tự hỏng. Gửi lại đúng yêu cầu đó sau một
+                // quãng nghỉ tăng dần; ngân sách riêng như họ lỗi "chờ chút".
+                if (soLanMayChuHong < kSoLanThuMayChuHong) {
+                    int cho = 1 << soLanMayChuHong;   // 1·2·4·8·16 giây
+                    ++soLanMayChuHong;
+                    LOG_WARN(kTag, "[%s] Telegram lỗi nội bộ (%s) — nghỉ %d giây rồi gửi lại"
+                                   " (lần %d/%d)",
+                             config_.label.c_str(), res.error.message.c_str(), cho,
+                             soLanMayChuHong, kSoLanThuMayChuHong);
+                    setLastError("Telegram lỗi nội bộ, đang gửi lại: " + res.error.message);
+                    std::this_thread::sleep_for(std::chrono::seconds(cho));
+                    --attempt;   // không tính vào ngân sách lỗi mạng
+                    continue;
+                }
+                LOG_WARN(kTag, "[%s] Telegram vẫn lỗi nội bộ sau %d lần gửi lại: %s",
+                         config_.label.c_str(), kSoLanThuMayChuHong,
+                         res.error.message.c_str());
+                setLastError("Telegram lỗi nội bộ: " + res.error.message);
                 return res;
             }
             if (res.error.message == "AUTH_KEY_UNREGISTERED" ||

@@ -387,23 +387,22 @@ stateDiagram-v2
 
     Nhan --> Huy: người dùng bấm Huỷ
     Nhan --> Huy: đóng tab (sendBeacon)
-    Nhan --> Huy: đứt kết nối quá 30 phút
+    Nhan --> Huy: quá hạn không hoạt động (30 phút)
     ChuanBi --> Huy: người dùng bấm Huỷ
     Huy --> Don: gỡ đúng những mảnh đã đẩy
     Don --> [*]
 
-    Nhan --> Loi: Telegram trả lỗi
-    Loi --> Don
+    Nhan --> Nhan: Telegram trả lỗi → giữ phiên, chờ gửi lại
 ```
 
-Bốn đường vào trạng thái huỷ:
+Ba đường vào trạng thái huỷ — và để ý là **lỗi Telegram không nằm trong đó**:
 
 | Tình huống | Cơ chế |
 |---|---|
 | Bấm nút **Huỷ** | `POST /api/upload/{id}/cancel` |
 | Đóng tab giữa chừng | `navigator.sendBeacon` gửi lệnh huỷ lúc `beforeunload` |
 | Rớt mạng, không quay lại | Bộ quét dọn phiên quá hạn (mặc định 30 phút) |
-| Telegram báo lỗi | Tự dọn rồi báo lên giao diện |
+| Telegram báo lỗi | **Không huỷ.** Giữ phiên, trả 503 kèm `Retry-After`; nếu thật sự không ai gửi tiếp thì 30 phút sau bộ quét dọn giúp |
 
 Dọn dẹp chỉ gỡ **đúng những mảnh phiên đó đã đẩy lên** — không đụng mảnh dùng
 chung với tệp khác. Xoá hẳn một tệp cũng theo nguyên tắc đó: mảnh nào còn tệp
@@ -431,7 +430,8 @@ flowchart LR
 |---|---|---|
 | 1 · trình duyệt → máy chủ | Wi-Fi chớp, máy ngủ, máy chủ khởi động lại | Thử lại 6 lần, giãn cách 1·2·4·8·16·30 giây; mỗi lần hỏi lại máy chủ đã nhận tới đâu rồi cắt tiếp từ đó |
 | 1' · WebDAV → máy chủ | Máy khách WebDAV không biết gửi tiếp | Máy chủ **giữ phiên dở**; lượt PUT sau gửi lại từ đầu, máy chủ băm phần trùng để đối chiếu rồi chỉ đẩy lên Telegram phần còn thiếu |
-| 2–3 · máy chủ → Telegram | Đứt TCP, hết giờ chờ, đổi trung tâm dữ liệu | Thử lại 3 lượt, giãn cách 0,5·1 giây, mở lại phiên mỗi lượt; tự theo `*_MIGRATE`; lỗi "chờ chút" ≤ 60 giây thì chờ rồi làm lại, ngân sách riêng |
+| 2–3 · máy chủ → Telegram | Đứt TCP, hết giờ chờ, đổi trung tâm dữ liệu | Thử lại 3 lượt, giãn cách 0,5·1 giây, mở lại phiên mỗi lượt; tự theo `*_MIGRATE` |
+| 2–3 · Telegram trả lỗi | "Chờ chút" (mã 420) hoặc máy chủ họ tự hỏng (mã 500) | Mỗi họ một ngân sách riêng, không tiêu vào số lần thử của lỗi mạng: 420 chờ đúng số giây họ yêu cầu (≤ 60 giây/lần, ≤ 180 giây/lời gọi), 500 gửi lại 5 lần giãn cách 1·2·4·8·16 giây |
 | 3 · đọc mảnh | Tài khoản hỏng, tham chiếu hết hạn | Hỏi lại tham chiếu rồi đọc lại; vẫn hỏng thì lần lượt thử mọi tài khoản còn hoạt động |
 | 4 · MySQL | Máy chủ CSDL ngắt kết nối nhàn rỗi | Tự kết nối lại một lần rồi chạy lại câu lệnh |
 
@@ -521,6 +521,96 @@ chúng chờ đúng số giây Telegram yêu cầu thay vì tự đoán.
 >
 > Bài học: **đừng nhận diện một họ lỗi bằng cách so tên chuỗi.** Máy chủ đặt thêm
 > tên mới là code câm lặng, và bạn chỉ biết khi có người gửi ảnh chụp nhật ký.
+
+### Họ lỗi "máy chủ Telegram tự hắt hơi"
+
+Họ 420 ở trên là Telegram nói *"bạn nhanh quá, nghỉ chút"*. Còn họ này là
+Telegram nói *"tui hỏng, không phải lỗi bạn"* — **mã lỗi 500**:
+
+| Định danh | Nghĩa |
+|---|---|
+| `RPC_CALL_FAIL` | Lời gọi thất bại trong nội bộ Telegram |
+| `RPC_MCGET_FAIL` | Không lấy được dữ liệu từ tầng lưu trữ của họ |
+| `INTERNAL_SERVER_ERROR` | Lỗi nội bộ chung |
+| `WORKER_BUSY_TOO_LONG_RETRY` | Tiến trình xử lý quá tải |
+| `MSG_WAIT_FAILED` | Một thông điệp trong cùng lô thất bại |
+| `MSGID_DECREASE_RETRY` | Lệch bộ đếm `msg_id`, gửi lại là hết |
+
+Cả sáu cái đều có cùng một cách xử lý đúng: **gửi lại đúng yêu cầu đó.** Không
+phải bỏ cuộc, không phải báo lỗi cho người dùng, chỉ là nghỉ một nhịp rồi gọi
+lại. Ngân sách riêng, 5 lần, giãn cách 1·2·4·8·16 giây — cũng như họ 420, nó
+không tiêu vào số lần thử dành cho lỗi mạng.
+
+Hai ngoại lệ đáng nhớ, vì chúng cũng mang mã 500 mà gửi lại thì vô nghĩa:
+`AUTH_RESTART` (phải làm lại quy trình đăng nhập từ đầu) và
+`PERSISTENT_TIMESTAMP_*` (thuộc luồng nhận cập nhật, cần đồng bộ lại trạng
+thái). Nên bộ nhận diện loại hai cái này ra **trước** khi xét mã 500.
+
+> **Đã từng sai ở đây, và lần này cái giá đắt nhất trong cả dự án: 36 GB.**
+>
+> Nhật ký người dùng gửi về, gọn lỏn ba dòng:
+>
+> ```
+> Dọn 22 mảnh đã tải lên
+> Đã huỷ: Tải phần 3059/3400 thất bại: Lỗi máy chủ: 500 RPC_CALL_FAIL
+> ```
+>
+> Tệp 58,29 GB, cắt mảnh 1,66 GB → 36 mảnh. Đã đẩy xong **22 mảnh ≈ 36 GB**,
+> đang ở mảnh thứ 23 thì Telegram hắt hơi đúng một cái. Và chương trình xoá sạch
+> cả 22 mảnh kia.
+>
+> Chuỗi nhân quả, ba tầng, mỗi tầng đều "hợp lý" khi đọc riêng lẻ:
+> 1. `500 RPC_CALL_FAIL` không thuộc họ 420 nên bộ nhận diện lỗi tạm thời —
+>    cái tui vừa mới viết ra để cứu chính tình huống này — trả về `false`.
+> 2. WebDAV thấy một lỗi ghi "vĩnh viễn" nên gọi `cancel()`.
+> 3. `cancel()` gọi `rollback()`, và `rollback()` làm đúng việc của nó: gỡ **mọi**
+>    mảnh phiên này đã đẩy lên. Cả 22 mảnh. Trong vài giây.
+>
+> Sửa cái số 1 là chuyện dễ (thêm họ 500). Nhưng tầng 2 mới là chỗ tui nghĩ lại:
+> **tại sao lỗi ghi lại được quyền xoá dữ liệu ngay lập tức?**
+>
+> Câu trả lời là không nên, và giữ phiên lại thì **không mất gì cả**: bộ quét
+> phiên quá hạn vẫn dọn đúng những mảnh đó nếu 30 phút sau không ai gửi tiếp.
+> Cùng một kết cục dọn dẹp, chỉ khác là có thêm 30 phút để nối lại. Nên nay cả
+> hai đường HTTP (web và WebDAV) **không bao giờ gọi `cancel()` khi ghi lỗi** —
+> chỉ trả 503 kèm `Retry-After` rồi ngồi im chờ lượt gửi sau.
+>
+> Đo lại sau khi sửa, bằng cách chèn đúng lỗi đó vào giữa một lượt tải thật:
+>
+> ```
+> ── LƯỢT 1: gặp 500 RPC_CALL_FAIL giữa chừng ──
+>   HTTP 503  · Retry-After: 5
+> ── CÓ XOÁ MẢNH ĐÃ TẢI LÊN KHÔNG? ──
+>   số lần "Dọn N mảnh": 0        ← trước khi sửa: 1
+>   mảnh còn trên đĩa  : 1        ← trước khi sửa: 0
+> ── LƯỢT 2: gửi lại, phải nối tiếp ──
+>   Nối lại: đã có 2,18 MB, nhận lại phần đầu để đối chiếu
+>   Phần đầu khớp tổng kiểm — nối tiếp từ 2,18 MB
+>   HTTP 201 · SHA gốc/tải về → ✓ KHỚP
+> ```
+>
+> Hai bài học, và cái thứ hai tui thấy quan trọng hơn:
+> - Telegram có **hai** họ lỗi đáng gửi lại, không phải một. 420 là "bạn nhanh
+>   quá", 500 là "tui hỏng". Bắt được họ này mà quên họ kia thì vẫn mất tệp.
+> - **Đường xử lý lỗi đừng kiêm luôn việc phá dữ liệu.** Nếu đã có một bộ dọn
+>   rác chạy định kỳ làm đúng việc đó, hãy để nó làm. Xoá ngay lúc gặp lỗi chỉ
+>   đổi lấy đúng một thứ: mất luôn cơ hội nối lại.
+
+### Cỡ mảnh và bán kính thiệt hại
+
+`upload.saveBigFilePart` đẩy từng phần 512 KB, nhưng **không có điểm nối lại
+giữa một mảnh**. Nghĩa là một mảnh hỏng thì phải đẩy lại cả mảnh đó từ đầu —
+và đó chính là ý nghĩa thật của tham số "cỡ mảnh" trong trang quản trị:
+
+| Cỡ mảnh | Tệp 58 GB | Hỏng một mảnh thì đẩy lại |
+|---|---|---|
+| 1,66 GB | 36 mảnh | tới **1,66 GB** |
+| 512 MB | 117 mảnh | tới 512 MB |
+| 128 MB | 466 mảnh | tới 128 MB |
+
+Mảnh to thì ít lời gọi API hơn, ít bản ghi hơn, nhìn danh sách gọn hơn. Mảnh
+nhỏ thì mỗi lần Telegram hắt hơi rẻ hơn nhiều. Với tệp hàng chục GB trên đường
+mạng không ổn định, cái thứ hai đáng giá hơn cái thứ nhất.
 
 ---
 
