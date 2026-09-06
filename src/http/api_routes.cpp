@@ -1265,6 +1265,7 @@ void registerApiRoutes(HttpServer& server, app::App& app) {
                 j.set("downloaded_text", formatBytes(s.bytesDownloaded));
                 j.set("status", s.status);
                 j.set("last_error", s.lastError);
+                j.set("last_error_transient", s.lastErrorTamThoi);
                 arr.push(j);
             }
         }

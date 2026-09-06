@@ -81,8 +81,12 @@ public:
 
     // Trạng thái hiển thị trên giao diện.
     std::string statusText() const;
-    void setLastError(const std::string& e);
+    // tamThoi = true khi thông báo chỉ là "đang xoay xở" (chờ theo yêu cầu của
+    // Telegram, đang gửi lại vì máy chủ họ lỗi) chứ không phải hỏng thật. Giao
+    // diện tô vàng thay vì đỏ — người ta đọc màu trước khi đọc chữ.
+    void setLastError(const std::string& e, bool tamThoi = false);
     std::string lastError() const;
+    bool lastErrorTamThoi() const;
 
     // Gọi một hàm API trên DC chỉ định (mặc định là DC nhà).
     InvokeResult invoke(const TlValue& request, int dcId = 0, int timeoutMs = 0);
@@ -180,6 +184,13 @@ private:
     std::atomic<uint64_t> bytesUploaded_{0};
     std::atomic<uint64_t> bytesDownloaded_{0};
     std::string lastError_;
+    bool lastErrorTamThoi_ = false;
+    // Thời điểm kết thúc một lượt nằm chờ NGẮN ngay trong invoke() (Telegram
+    // bảo nghỉ vài giây, hoặc đang giãn cách trước khi gửi lại vì họ lỗi nội
+    // bộ). Khác floodWaitUntil_ — cái đó chỉ đặt khi phải chờ lâu tới mức bỏ
+    // lượt, nhường việc cho tài khoản khác. Không có mốc này thì suốt lúc nằm
+    // chờ giao diện vẫn ghi "Sẵn sàng", trong khi thẻ lại hiện thông báo chờ.
+    std::atomic<int64_t> choNganDen_{0};
     std::atomic<int64_t> floodWaitUntil_{0};
 };
 

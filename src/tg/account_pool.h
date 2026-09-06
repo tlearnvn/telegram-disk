@@ -32,6 +32,8 @@ struct AccountStatus {
     int64_t floodWaitUntil = 0;
     std::string status;
     std::string lastError;
+    // Thông báo chỉ là "đang xoay xở", không phải hỏng thật — giao diện tô vàng.
+    bool lastErrorTamThoi = false;
 };
 
 // Hàm lưu lại phiên đăng nhập vào cơ sở dữ liệu sau khi thay đổi.

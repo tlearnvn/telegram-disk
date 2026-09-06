@@ -234,9 +234,10 @@ bool TgAccount::connected() const {
     return it != sessions_.end() && it->second->connected();
 }
 
-void TgAccount::setLastError(const std::string& e) {
+void TgAccount::setLastError(const std::string& e, bool tamThoi) {
     std::lock_guard<std::mutex> lk(mu_);
     lastError_ = e;
+    lastErrorTamThoi_ = tamThoi && !e.empty();
 }
 
 std::string TgAccount::lastError() const {
@@ -244,9 +245,15 @@ std::string TgAccount::lastError() const {
     return lastError_;
 }
 
+bool TgAccount::lastErrorTamThoi() const {
+    std::lock_guard<std::mutex> lk(mu_);
+    return lastErrorTamThoi_;
+}
+
 std::string TgAccount::statusText() const {
     int64_t wait = floodWaitUntil_.load();
     if (wait > nowUnix()) return "Đang chờ giới hạn tần suất";
+    if (choNganDen_.load() > nowUnix()) return "Đang chờ Telegram";
     if (!authorized_.load()) return "Chưa đăng nhập";
     if (!connected()) return "Mất kết nối";
     return "Sẵn sàng";
@@ -294,7 +301,14 @@ InvokeResult TgAccount::invoke(const TlValue& request, int dcId, int timeoutMs) 
             return r;
         }
         InvokeResult res = s->invoke(request, timeoutMs);
-        if (res.ok || res.partial) return res;
+        if (res.ok || res.partial) {
+            // Gọi được rồi thì xoá thông báo cũ. Không xoá thì cái "Đang chờ 3
+            // giây theo yêu cầu của Telegram" nằm lại trên thẻ tài khoản vĩnh
+            // viễn, trong khi trạng thái đã về "Sẵn sàng" từ đời nào — nhìn vào
+            // tưởng tài khoản đang kẹt, mà thật ra nó đang chạy phà phà.
+            if (!lastError().empty()) setLastError("");
+            return res;
+        }
 
         if (!res.error.empty()) {
             int newDc = dcId;
@@ -315,15 +329,19 @@ InvokeResult TgAccount::invoke(const TlValue& request, int dcId, int timeoutMs) 
                              config_.label.c_str(), res.error.message.c_str(), giayCho, daChoGiay,
                              kTongChoToiDaGiay);
                     setLastError("Đang chờ " + std::to_string(giayCho) +
-                                 " giây theo yêu cầu của Telegram");
+                                     " giây theo yêu cầu của Telegram",
+                                 /*tamThoi=*/true);
+                    choNganDen_.store(nowUnix() + giayCho + 1);
                     std::this_thread::sleep_for(std::chrono::seconds(giayCho + 1));
+                    choNganDen_.store(0);
                     --attempt;   // lượt chờ không tính vào ngân sách lỗi mạng
                     continue;
                 }
                 floodWaitUntil_.store(nowUnix() + giayCho);
                 LOG_WARN(kTag, "[%s] Giới hạn tần suất %d giây, quá sức chờ — nhường tài khoản khác",
                          config_.label.c_str(), giayCho);
-                setLastError("Bị giới hạn tần suất " + std::to_string(giayCho) + " giây");
+                setLastError("Bị giới hạn tần suất " + std::to_string(giayCho) + " giây",
+                             /*tamThoi=*/true);
                 return res;
             }
             if (laLoiMayChuHong(res.error)) {
@@ -336,8 +354,11 @@ InvokeResult TgAccount::invoke(const TlValue& request, int dcId, int timeoutMs) 
                                    " (lần %d/%d)",
                              config_.label.c_str(), res.error.message.c_str(), cho,
                              soLanMayChuHong, kSoLanThuMayChuHong);
-                    setLastError("Telegram lỗi nội bộ, đang gửi lại: " + res.error.message);
+                    setLastError("Telegram lỗi nội bộ, đang gửi lại: " + res.error.message,
+                                 /*tamThoi=*/true);
+                    choNganDen_.store(nowUnix() + cho);
                     std::this_thread::sleep_for(std::chrono::seconds(cho));
+                    choNganDen_.store(0);
                     --attempt;   // không tính vào ngân sách lỗi mạng
                     continue;
                 }

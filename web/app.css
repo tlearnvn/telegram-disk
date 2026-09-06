@@ -685,6 +685,8 @@ html[data-theme="dark"] .ft-presentation { background: #32211a; }
   flex-wrap: wrap; }
 .account-actions { display: flex; gap: 6px; margin-top: 2px; flex-wrap: wrap; }
 .account-error { font-size: 12px; color: var(--do); word-break: break-word; }
+/* Đang chờ / đang gửi lại thì vàng: đỏ nghĩa là chết, vàng nghĩa là đang xoay xở. */
+.account-error.warn { color: var(--vang); }
 
 .group-list { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; }
 .group-item {

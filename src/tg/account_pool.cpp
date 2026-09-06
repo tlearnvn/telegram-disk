@@ -176,6 +176,7 @@ std::vector<AccountStatus> AccountPool::statuses() const {
         s.bytesDownloaded = a->bytesDownloaded();
         s.status = s.enabled ? a->statusText() : "Đã tắt";
         s.lastError = a->lastError();
+        s.lastErrorTamThoi = a->lastErrorTamThoi();
         out.push_back(std::move(s));
     }
     return out;

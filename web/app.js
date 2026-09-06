@@ -1584,8 +1584,12 @@ async function napTaiKhoan() {
         el('p', {}, 'Chưa có tài khoản nào. Bấm “Thêm tài khoản” để bắt đầu.')));
     }
     for (const a of kq.accounts) {
-      const mau = !a.enabled ? 'off' : a.authorized && a.connected ? 'ok'
-                : a.authorized ? 'warn' : 'err';
+      // Đang chờ theo yêu cầu của Telegram vẫn là tài khoản khoẻ, chỉ đang xoay
+      // xở — chấm vàng, không phải xanh (kẻo tưởng rảnh) cũng không phải đỏ.
+      const mau = !a.enabled ? 'off'
+                : !a.authorized ? 'err'
+                : a.last_error_transient ? 'warn'
+                : a.connected ? 'ok' : 'warn';
       box.appendChild(el('div', { class: 'account-card' },
         el('div', { class: 'account-head' },
           el('div', { class: 'account-avatar',
@@ -1600,7 +1604,10 @@ async function napTaiKhoan() {
           el('span', {}, '⬆ ' + a.uploaded_text),
           el('span', {}, '⬇ ' + a.downloaded_text),
           a.active_uploads ? el('span', {}, `${a.active_uploads} việc`) : null),
-        a.last_error ? el('div', { class: 'account-error', text: a.last_error }) : null,
+        a.last_error
+          ? el('div', { class: 'account-error' + (a.last_error_transient ? ' warn' : ''),
+                        text: a.last_error })
+          : null,
         el('div', { class: 'account-actions' },
           el('button', { class: 'btn btn-ghost', onclick: async () => {
             await api('/api/accounts/toggle',

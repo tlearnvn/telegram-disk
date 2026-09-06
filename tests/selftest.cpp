@@ -971,6 +971,63 @@ void testLoiBaoCho() {
 }
 
 // ---------------------------------------------------------------------------
+// Thông báo trên thẻ tài khoản: đúng màu, và biết tự tắt.
+//
+// Người dùng chụp màn hình hỏi "báo vầy là bình thường heng" — thẻ ghi
+// "Sẵn sàng", chấm xanh, mà ngay dưới là dòng ĐỎ "Đang chờ 3 giây theo yêu cầu
+// của Telegram", trong khi lượt chờ đó đã xong từ hai mươi phút trước.
+void testThongBaoTaiKhoan() {
+    nhom("Thông báo trên thẻ tài khoản");
+
+    using namespace tg;
+
+    TlSchema schema;
+    std::string mtproto, apiSchema;
+    if (assets::find("schema/mtproto.tl", mtproto)) schema.load(mtproto, nullptr);
+    if (assets::find("schema/api.tl", apiSchema)) schema.load(apiSchema, nullptr);
+
+    AppInfo info;
+    info.apiId = 12345;
+    info.layer = schema.layer();
+    AccountPool pool(schema, info);
+    TgAccountConfig ac;
+    ac.id = 1;
+    ac.label = "lo-ngoc-huong";
+    ac.homeDc = 5;
+    TgAccount* acc = pool.addAccount(ac);
+    kiem(acc != nullptr, "tạo được tài khoản để thử");
+    if (!acc) return;
+
+    kiem(acc->lastError().empty() && !acc->lastErrorTamThoi(),
+         "tài khoản mới chưa có thông báo nào");
+
+    // Lỗi thật thì đỏ.
+    acc->setLastError("Phiên đăng nhập không còn hiệu lực: AUTH_KEY_UNREGISTERED");
+    kiem(!acc->lastErrorTamThoi(), "lỗi thật KHÔNG bị đánh dấu tạm thời (giao diện tô đỏ)");
+
+    // Đang xoay xở thì vàng.
+    acc->setLastError("Đang chờ 3 giây theo yêu cầu của Telegram", /*tamThoi=*/true);
+    kiem(acc->lastErrorTamThoi(), "đang chờ Telegram được đánh dấu tạm thời (tô vàng)");
+    kiem(acc->lastError() == "Đang chờ 3 giây theo yêu cầu của Telegram",
+         "giữ nguyên nội dung thông báo");
+
+    // Và phải tự tắt được — đây là chỗ trước đây thiếu hẳn, nên dòng chờ nằm
+    // lại trên thẻ mãi mãi cho tới lần hỏng kế tiếp.
+    acc->setLastError("");
+    kiem(acc->lastError().empty(), "xoá được thông báo khi gọi lại thành công");
+    kiem(!acc->lastErrorTamThoi(), "xoá thông báo thì cờ tạm thời cũng tắt theo");
+
+    // Chuỗi rỗng mà vẫn bật cờ thì giao diện có thể vẽ một vệt vàng trống trơn.
+    acc->setLastError("", /*tamThoi=*/true);
+    kiem(!acc->lastErrorTamThoi(), "thông báo rỗng không bao giờ mang cờ tạm thời");
+
+    // Trạng thái hiển thị: tài khoản chưa đăng nhập thì nói đúng như vậy, chứ
+    // không phải "Sẵn sàng".
+    kiem(acc->statusText() == "Chưa đăng nhập", "trạng thái tài khoản chưa đăng nhập",
+         acc->statusText());
+}
+
+// ---------------------------------------------------------------------------
 void testCauHinh() {
     nhom("Cấu hình");
     Config& cfg = Config::instance();
@@ -1125,6 +1182,7 @@ int main() {
     testCoSoDuLieu();
     testDoiTaiKhoanKhiDoc();
     testLoiBaoCho();
+    testThongBaoTaiKhoan();
     testCauHinh();
     testInitConnection();
     testPhienBan();

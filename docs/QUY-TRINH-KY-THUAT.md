@@ -612,6 +612,47 @@ Mảnh to thì ít lời gọi API hơn, ít bản ghi hơn, nhìn danh sách g�
 nhỏ thì mỗi lần Telegram hắt hơi rẻ hơn nhiều. Với tệp hàng chục GB trên đường
 mạng không ổn định, cái thứ hai đáng giá hơn cái thứ nhất.
 
+### Nói cho đúng màu
+
+Cả hai họ lỗi trên đều là "đang xoay xở", không phải "hỏng". Nhưng người dùng
+không đọc mã lỗi — họ đọc **màu**. Nên thẻ tài khoản phân biệt ba mức:
+
+| Màu | Nghĩa | Ví dụ |
+|---|---|---|
+| 🟢 xanh | Chạy bình thường | `Sẵn sàng` |
+| 🟡 vàng | Đang xoay xở, tự lo được | `Đang chờ 3 giây theo yêu cầu của Telegram`, `Telegram lỗi nội bộ, đang gửi lại` |
+| 🔴 đỏ | Hỏng thật, cần người can thiệp | `Phiên đăng nhập không còn hiệu lực` |
+
+Việc phân loại **không** làm bằng cách dò chuỗi ở trình duyệt — chỗ sinh ra
+thông báo biết rõ nó thuộc loại nào, nên `setLastError()` nhận thêm cờ
+`tamThoi` và API trả kèm `last_error_transient`.
+
+> **Đã từng sai ở đây, và lần này người dùng bắt được bằng đúng một câu hỏi:
+> "báo như vầy là bình thường heng?"**
+>
+> Ảnh chụp gửi kèm: thẻ ghi `Sẵn sàng`, chấm **xanh**, mà ngay dưới là dòng
+> **đỏ** `Đang chờ 3 giây theo yêu cầu của Telegram`. Xanh và đỏ cùng một thẻ.
+>
+> Hai lỗi chồng nhau, và cái thứ hai mới là cái thật:
+>
+> 1. `.account-error` tô đỏ mọi thông báo, bất kể nội dung. Tui viết hẳn
+>    nguyên tắc "vàng nghĩa là đang xoay xở" vào tài liệu này, áp cho thẻ tải
+>    lên, rồi quên áp cho thẻ tài khoản.
+> 2. **Thông báo không bao giờ được xoá.** `invoke()` gọi `setLastError()` ở mọi
+>    nhánh hỏng, nhưng nhánh thành công thì `return res` thẳng. Nên dòng "đang
+>    chờ 3 giây" nằm lại trên thẻ **vĩnh viễn** — lượt chờ xong từ hai mươi phút
+>    trước, tài khoản đã đẩy thêm mấy GB, mà thẻ vẫn báo như đang kẹt.
+>
+> Còn một chỗ thứ ba, nhỏ hơn: `statusText()` chỉ biết tới `floodWaitUntil_`,
+> mà mốc đó chỉ đặt khi phải chờ **lâu tới mức bỏ lượt**. Lượt chờ ngắn ngay
+> trong `invoke()` không đặt gì cả, nên suốt lúc nằm chờ trạng thái vẫn là
+> `Sẵn sàng`. Nay có thêm `choNganDen_` để nói thật: `Đang chờ Telegram`.
+>
+> Bài học: **một thông báo trạng thái phải biết tự tắt.** Chỗ nào đặt nó thì
+> chỗ đối xứng phải xoá nó — không thì nó thôi là trạng thái, chỉ còn là vết
+> bẩn trên màn hình. Và vết bẩn đó khiến người ta ngờ cả những thứ đang chạy
+> đúng.
+
 ---
 
 ## 8. Tầng MTProto

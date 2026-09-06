@@ -512,6 +512,31 @@ Mảnh to thì ít tin nhắn hơn, danh sách gọn hơn. Mảnh nhỏ thì m�
 hơn nhiều. Đang tải tệp hàng chục GB trên đường mạng không thật ổn định thì nên
 hạ **Cỡ mảnh** trong Cài đặt xuống 256–512 MB.
 
+### Thẻ tài khoản hiện chữ vàng — có sao không?
+
+Không sao. **Vàng nghĩa là đang xoay xở, không phải hỏng.** Ba mức màu:
+
+| Chấm | Nghĩa | Cần làm gì |
+|---|---|---|
+| 🟢 xanh | Chạy bình thường | Không |
+| 🟡 vàng | Đang chờ Telegram hoặc đang gửi lại | Không — nó tự lo |
+| 🔴 đỏ | Hỏng thật | Xem thông báo, thường là đăng nhập lại |
+
+Ví dụ dòng vàng hay gặp nhất, và cả hai đều lành:
+
+```
+Đang chờ 3 giây theo yêu cầu của Telegram
+Telegram lỗi nội bộ, đang gửi lại: 500 RPC_CALL_FAIL
+```
+
+Trong nhật ký, mấy dòng này ở mức `WARN`. `WARN` nghĩa là *"thấy rồi, xử lý
+rồi"* — chỉ `ERROR` mới là chuyện đáng lo.
+
+> Bản trước bản này tô **đỏ** mọi thông báo, kể cả mấy dòng lành trên, **và
+> không bao giờ xoá chúng đi** khi tải lại được. Nên một lượt chờ 3 giây để lại
+> vệt đỏ trên thẻ hàng giờ đồng hồ, trong khi tài khoản vẫn đang chạy phà phà.
+> Đã sửa: đúng màu, và tự tắt ngay khi gọi lại thành công.
+
 ### `FLOOD_WAIT`
 
 Telegram bắt chờ vì gửi quá nhanh. Ứng dụng tự chờ rồi thử lại. Bị thường xuyên
