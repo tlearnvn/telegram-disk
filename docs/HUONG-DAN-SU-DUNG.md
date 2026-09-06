@@ -214,6 +214,14 @@ Nếu không có dòng này thì đó mới là chuyện lạ. Muốn khựng ng
 
 Cả hai đều ở [Cài đặt → Lưu trữ](#số-mảnh-song-song).
 
+**Tải bằng WebDAV cũng y hệt.** rclone, Explorer, Finder đều đi chung một đường
+với web nên nhịp khựng giống nhau. Khác một chỗ: WebDAV không có cách nào báo
+tiến độ cho máy khách, nên rclone chỉ thấy tốc độ tụt xuống rồi lên lại — nó
+**đợi chứ không lỗi**. Muốn nhìn thấy chuyện gì đang xảy ra thì mở trang web ở
+mục **Đang tải lên**: phiên do rclone tạo cũng hiện đầy đủ ở đó, kèm đúng dòng
+`⏳ Đệm đầy — đợi mảnh N lên xong`. Huy hiệu bên thanh trái cũng sáng lên ngay
+cả khi bạn đang xem trang khác.
+
 Xong thì thẻ chuyển sang **Hoàn tất** và tự biến mất sau vài giây:
 
 ![Tải lên hoàn tất](anh/09-tai-len-hoan-tat.png)

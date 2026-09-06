@@ -1231,6 +1231,17 @@ function henGoThe(theoDoi, cho = GIU_THE_XONG_MS) {
   }, cho);
 }
 
+// Huy hiệu bên thanh điều hướng phải đúng KỂ CẢ khi đang xem trang khác — đó
+// chính là việc của nó: báo có thứ đang chạy trong lúc mình không nhìn tới. Vẽ
+// cả danh sách chỉ để cập nhật con số này thì phí, nên tách riêng.
+function veHuyHieuTaiLen() {
+  let dangChay = 0;
+  for (const t of S.phienTaiLen.values()) if (!t.lop || t.lop === 'warn') dangChay++;
+  const badge = $('#badge-tai-len');
+  badge.hidden = dangChay === 0;
+  badge.textContent = String(dangChay);
+}
+
 function veDanhSachTaiLen() {
   const box = $('#danh-sach-tai-len');
   const list = Array.from(S.phienTaiLen.values());
@@ -1316,9 +1327,7 @@ function veDanhSachTaiLen() {
         el('span', {}, toc ? tocDo(toc) : ''),
         el('span', {}, conLai ? 'Còn ' + thoiLuong(conLai) : ''))));
   }
-  const badge = $('#badge-tai-len');
-  badge.hidden = dangChay === 0;
-  badge.textContent = String(dangChay);
+  veHuyHieuTaiLen();
 
   // Không còn phiên nào chạy thì nút chỉ dọn danh sách, nhãn phải nói đúng vậy.
   const nut = $('#nut-huy-tat-ca');
@@ -1414,7 +1423,11 @@ async function dongBoTaiLen() {
       t.daGui = t.tong;
       henGoThe(t);
     }
+    // Chỉ vẽ lại danh sách khi đang mở trang đó, nhưng huy hiệu thì LUÔN cập
+    // nhật: phiên do rclone hay tab khác tạo cũng phải làm huy hiệu sáng lên,
+    // không thì ngồi ở trang Tệp chẳng biết máy chủ đang bận đẩy gì.
     if (S.view === 'tai-len') veDanhSachTaiLen();
+    else veHuyHieuTaiLen();
     // Thẻ 'warn' đang đếm ngược thử lại vẫn tính là đang chạy — giống hệt
     // cách veDanhSachTaiLen() đếm, để huy hiệu không nhấp nháy lệch nhau.
     const dangChay = Array.from(S.phienTaiLen.values())
