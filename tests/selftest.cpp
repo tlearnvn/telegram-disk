@@ -1125,6 +1125,113 @@ void testDaySongSong() {
 }
 
 // ---------------------------------------------------------------------------
+// Hỏi tiến độ trong lúc dòng vào đang bị CHẶN.
+//
+// Khi vùng đệm đã đầy, receive() phải đứng đợi mảnh đầu hàng lên xong — đó là
+// thiết kế, không phải lỗi. Nhưng nếu progress() cũng phải giành cùng cái khoá
+// mà receive() đang giữ suốt lúc đợi, thì mỗi lần nghẽn là cả trang web đứng
+// hình: số liệu ngừng nhảy, danh sách tải lên của MỌI phiên khác cũng treo
+// theo, và người dùng không biết vì sao. Phép kiểm này đo đúng chuyện đó — hỏi
+// tiến độ phải luôn trả lời ngay, kể cả giữa lúc nghẽn.
+void testHoiTienDoLucNghen() {
+    nhom("Hỏi tiến độ khi dòng vào bị chặn");
+
+    std::string thuMuc = "ttd_test_nghen";
+    removeDirectoryRecursive(thuMuc);
+    ensureDirectoryExists(thuMuc);
+    std::string loi;
+    db::DatabaseConfig dcfg;
+    dcfg.kind = "sqlite";
+    dcfg.sqlitePath = joinPath(thuMuc, "test.db");
+    auto database = db::createDatabase(dcfg, loi);
+    kiem(database != nullptr && database->open(loi) && database->migrate(loi),
+         "dựng CSDL tạm", loi);
+    if (!database) return;
+
+    Config& cfg = Config::instance();
+    auto luuCu = cfg.storage;
+    struct TraLai {
+        Config& c;
+        decltype(luuCu) cu;
+        ~TraLai() { c.storage = cu; }
+    } traLai{cfg, luuCu};
+
+    cfg.storage.chunkSize = 64 * 1024;
+    cfg.storage.bufferMode = "memory";
+    cfg.storage.parallelChunks = 2;   // đầy sớm cho nghẽn sớm
+    cfg.storage.memoryBudget = 64ull * 1024 * 1024;
+    cfg.storage.spoolDirectory = joinPath(thuMuc, "spool");
+    cfg.storage.deduplicate = false;
+
+    BackendDemSongSong backend;
+    backend.nghiMs = 600;             // mỗi mảnh "lên Telegram" mất 600 ms
+    storage::StorageEngine engine(*database, backend, cfg);
+    storage::UploadManager uploads(engine, *database, cfg);
+
+    const uint64_t tong = 6 * cfg.storage.chunkSize;
+    Bytes goc(tong, 0xA5);
+
+    storage::UploadInitRequest ur;
+    ur.name = "nghen.bin";
+    ur.targetFolderPath = "/";
+    ur.totalSize = tong;
+    ur.ownerId = 1;
+    ur.policy = storage::ConflictPolicy::Replace;
+    storage::UploadInitResult init = uploads.begin(ur);
+    kiem(init.ok, "mở được phiên tải lên", init.error);
+    if (!init.ok) return;
+    auto phien = uploads.find(init.uploadId);
+    kiem(phien != nullptr, "tìm được phiên");
+    if (!phien) return;
+
+    std::atomic<bool> xong{false};
+    std::atomic<bool> nhanDu{false};
+    std::thread nguoiGui([&]() {
+        std::string e;
+        bool oke = true;
+        size_t buoc = 8 * 1024;
+        for (uint64_t off = 0; off < tong && oke; off += buoc) {
+            size_t n = static_cast<size_t>(std::min<uint64_t>(buoc, tong - off));
+            oke = phien->receive(goc.data() + off, n, e);
+        }
+        nhanDu.store(oke);
+        xong.store(true);
+    });
+
+    // Trong lúc đó, hỏi tiến độ liên tục và đo lần lâu nhất.
+    int64_t lauNhat = 0;
+    int soLan = 0;
+    bool thayCho = false;
+    while (!xong.load()) {
+        int64_t t0 = monotonicMillis();
+        storage::UploadProgress p = phien->progress();
+        int64_t mat = monotonicMillis() - t0;
+        if (mat > lauNhat) lauNhat = mat;
+        ++soLan;
+        if (p.waitingChunk > 0) thayCho = true;
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    nguoiGui.join();
+
+    kiem(nhanDu.load(), "nhận hết dữ liệu trong lúc bị hỏi tiến độ liên tục");
+    kiem(soLan > 20, "hỏi được nhiều lượt tiến độ", std::to_string(soLan) + " lượt");
+    // Nghẽn một mảnh là 600 ms. Nếu progress() phải đợi theo thì con số này sẽ
+    // xấp xỉ 600; ngưỡng 150 ms đủ rộng để không nhạy với máy chạy kiểm tra
+    // đang tải nặng, mà vẫn bắt được kiểu chờ-theo-khoá.
+    kiem(lauNhat < 150, "hỏi tiến độ không bị dòng vào chặn",
+         "lần lâu nhất = " + std::to_string(lauNhat) + " ms");
+    kiem(thayCho, "có lúc nói rõ đang đợi mảnh nào lên xong");
+    kiem(phien->progress().waitingChunk == 0, "đợi xong thì thôi báo đợi");
+
+    db::FileEntry ra;
+    kiem(uploads.complete(init.uploadId, ra, loi), "hoàn tất phiên", loi);
+    kiem(ra.size == tong, "tệp đủ kích thước", std::to_string(ra.size));
+
+    database->close();
+    removeDirectoryRecursive(thuMuc);
+}
+
+// ---------------------------------------------------------------------------
 // Mốc nối lại khi một mảnh GIỮA hỏng.
 //
 // Đây là phép kiểm đắt giá nhất trong cả bộ: chạy song song thì mảnh 5 có thể
@@ -1692,6 +1799,7 @@ int main() {
     testCoSoDuLieu();
     testDoiTaiKhoanKhiDoc();
     testDaySongSong();
+    testHoiTienDoLucNghen();
     testMocNoiLaiKhiManhGiuaHong();
     testHongLucHoanTatKhongXoaMang();
     testChonLaiThiNoiTiep();

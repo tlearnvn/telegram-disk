@@ -1244,25 +1244,30 @@ function veDanhSachTaiLen() {
   let dangChay = 0;
   for (const t of list) {
     if (dangHoatDong(t)) dangChay++;
-    const pct = t.tong ? Math.min(100, (t.daGui / t.tong) * 100) : 0;
+    // daGui của phiên do chính tab này chạy chỉ nhích khi lượt POST TRẢ VỀ. Mà
+    // đúng lúc vùng đệm đầy thì lượt POST đó nằm im hàng phút, nên con số đứng
+    // hình dù máy chủ vẫn đang nuốt dữ liệu đều đều. Lấy thêm số của máy chủ và
+    // chọn cái lớn hơn: thanh không bao giờ tụt, mà cũng không đứng.
+    const daGui = t.ngoai ? t.daGui : Math.max(t.daGui || 0, t.daGuiMayChu || 0);
+    const pct = t.tong ? Math.min(100, (daGui / t.tong) * 100) : 0;
     // Phiên do máy khách khác chạy (rclone qua WebDAV) thì tab này không biết nó
     // bắt đầu lúc nào — batDau chỉ là mốc giả đặt lúc thấy nó lần đầu, nên tự
     // chia ra sẽ cho những con số kiểu "28 GB/s". Máy chủ tính sẵn tốc độ thật
     // từ thời điểm mở phiên; dùng số của máy chủ.
     const giay = (Date.now() - t.batDau) / 1000;
     const toc = t.ngoai ? (Number(t.tocMayChu) || 0)
-                        : (giay > 0.4 ? t.daGui / giay : 0);
-    const conLai = toc > 1 && t.tong > t.daGui ? (t.tong - t.daGui) / toc : 0;
+                        : (giay > 0.4 ? daGui / giay : 0);
+    const conLai = toc > 1 && t.tong > daGui ? (t.tong - daGui) / toc : 0;
 
     // Hai mốc khác nhau, và ở chế độ đẩy song song chúng lệch nhau rất xa:
     //   daGui = máy chủ đã NHẬN được bấy nhiêu (nằm trong vùng đệm)
     //   daLen = bấy nhiêu đã THẬT SỰ nằm trên Telegram
     // Trước đây thanh chỉ vẽ daGui, nên nó chạm 100% rồi đứng im hàng phút
     // trong khi vài GB còn đang bay — nhìn y như treo.
-    const daLen = Math.min(Number(t.daLen) || 0, t.daGui || 0);
+    const daLen = Math.min(Number(t.daLen) || 0, daGui || 0);
     const pctLen = t.tong ? Math.min(100, (daLen / t.tong) * 100) : 0;
     // Lệch quá 1% mới coi là "đang xếp hàng" — tránh nhấp nháy vì lệch vụn.
-    const dangXepHang = dangHoatDong(t) && t.tong > 0 && (t.daGui - daLen) > t.tong / 100;
+    const dangXepHang = dangHoatDong(t) && t.tong > 0 && (daGui - daLen) > t.tong / 100;
 
     box.appendChild(el('div', { class: 'upload-item' },
       el('div', { class: 'upload-top' },
@@ -1284,13 +1289,30 @@ function veDanhSachTaiLen() {
         el('b', { style: `width:${pctLen}%`,
                   title: `Đã nằm trên Telegram: ${dungLuong(daLen)}` })),
       el('div', { class: 'upload-meta' },
-        el('span', {}, `${dungLuong(t.daGui)} / ${dungLuong(t.tong)} (${pct.toFixed(1)}%)`),
+        el('span', {}, `${dungLuong(daGui)} / ${dungLuong(t.tong)} (${pct.toFixed(1)}%)`),
         // Chỉ nói tới Telegram khi hai con số thật sự lệch nhau. Ở chế độ đẩy
         // tuần tự chúng gần như trùng, thêm vào chỉ tổ rối mắt.
         el('span', { class: dangXepHang ? 'cho-len' : '' },
            dangXepHang ? `↑ ${dungLuong(daLen)} đã lên Telegram` : ''),
-        el('span', {}, t.tongMang ? `Mảnh ${t.mangHienTai}/${t.tongMang}` : ''),
-        el('span', {}, t.taiKhoan ? `Qua: ${t.taiKhoan}` : ''),
+        // Mảnh cuối vừa giao đi thì mốc mảnh đã nhảy sang mảnh kế — mà không
+        // còn mảnh kế nào nữa. Chặn lại, kẻo hiện "Mảnh 13/12".
+        el('span', {}, t.tongMang
+             ? `Mảnh ${Math.min(t.mangHienTai || 1, t.tongMang)}/${t.tongMang}` : ''),
+        // Đang đợi một mảnh lên xong. Không phải lỗi, nhưng nếu không nói thì
+        // mọi con số cứng lại và trông y hệt treo máy. Hai lý do khác nhau nên
+        // hai câu khác nhau: còn dữ liệu để nhận thì là vùng đệm đầy (chặn dòng
+        // vào); nhận hết rồi thì chỉ là đẩy nốt phần còn tồn.
+        t.doiManh
+          ? el('span', { class: 'doi-nen',
+                         title: daGui >= t.tong
+                           ? 'Đã nhận đủ tệp, giờ đợi những mảnh cuối bay lên Telegram.'
+                           : 'Đã đệm đủ số mảnh cho phép — nhận thêm nữa là phình'
+                             + ' RAM hoặc đĩa. Tăng "số mảnh song song" hoặc giảm'
+                             + ' cỡ mảnh để bớt khựng.' },
+               daGui >= t.tong && t.tong > 0
+                 ? `⏳ Đang đẩy nốt mảnh ${t.doiManh} lên Telegram`
+                 : `⏳ Đệm đầy — đợi mảnh ${t.doiManh} lên xong`)
+          : el('span', {}, t.taiKhoan ? `Qua: ${t.taiKhoan}` : ''),
         el('span', {}, toc ? tocDo(toc) : ''),
         el('span', {}, conLai ? 'Còn ' + thoiLuong(conLai) : ''))));
   }
@@ -1350,8 +1372,18 @@ async function dongBoTaiLen() {
       const cu = S.phienTaiLen.get(u.id);
       if (cu) {
         // Phiên của chính tab này do vòng tải lên tự cập nhật — không đụng vào,
-        // tránh giẫm lên nhau.
-        if (!cu.ngoai) continue;
+        // tránh giẫm lên nhau. Trừ HAI thứ mà chỉ máy chủ mới biết, và đúng lúc
+        // cần nhất thì tab lại không hỏi được: khi vùng đệm đầy, lượt POST đang
+        // bay không trả lời cho tới khi mảnh đầu hàng lên xong — có khi vài
+        // phút. Suốt lúc đó các mảnh khác vẫn đang bay lên Telegram thật, nên
+        // lấy hai con số này từ máy chủ để thanh thứ hai vẫn nhích và người
+        // dùng đọc được vì sao đang khựng.
+        if (!cu.ngoai) {
+          if (typeof u.stored === 'number') cu.daLen = u.stored;
+          if (typeof u.received === 'number') cu.daGuiMayChu = u.received;
+          cu.doiManh = u.waiting_chunk || 0;
+          continue;
+        }
         cu.ten = u.name;
         cu.tong = u.total;
         cu.daGui = u.received;
@@ -1361,6 +1393,7 @@ async function dongBoTaiLen() {
         cu.taiKhoan = u.account;
         cu.mangHienTai = u.chunk_index + 1;
         cu.tongMang = u.chunk_total;
+        cu.doiManh = u.waiting_chunk || 0;
         continue;
       }
       S.phienTaiLen.set(u.id, {
@@ -1368,6 +1401,7 @@ async function dongBoTaiLen() {
         tocMayChu: u.speed,
         trangThai: u.state_text, lop: '', batDau: Date.now() - 1000,
         taiKhoan: u.account, mangHienTai: u.chunk_index + 1, tongMang: u.chunk_total,
+        doiManh: u.waiting_chunk || 0,
         ngoai: true,
       });
     }

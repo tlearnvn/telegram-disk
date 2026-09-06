@@ -675,6 +675,9 @@ html[data-theme="dark"] .ft-presentation { background: #32211a; }
 /* Con số "đã lên Telegram" — cùng màu với lớp đậm của thanh tiến độ để mắt tự
    nối hai thứ đó với nhau mà không cần chú thích. */
 .upload-meta .cho-len { color: var(--xanh-la); font-weight: 600; }
+/* Đang đợi vùng đệm vơi bớt. Màu cam "để ý chút" chứ không phải đỏ báo lỗi —
+   đây là nhịp làm việc bình thường, không phải hỏng hóc. */
+.upload-meta .doi-nen { color: var(--vang); font-weight: 600; cursor: help; }
 
 /* ── Tài khoản Telegram ─────────────────────────────────────────────────── */
 .account-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr));

@@ -668,6 +668,46 @@ Hai ràng buộc làm nên toàn bộ thiết kế này:
 > tuần tự, nên chỗ nào lỡ dùng lẫn cũng không ai phát hiện — cho tới ngày thêm
 > luồng.
 
+### Khựng ở ranh giới mảnh: đúng chỗ nghẽn, và cái khoá không đáng có
+
+Vùng đệm chứa được tối đa `số mảnh song song × cỡ mảnh`. Với 4 mảnh 512 MB thì
+đó là **2 GB**. Trong 2 GB đầu, mạng nội bộ 15 MB/s cứ thế đổ vào — nhanh hơn
+hẳn tốc độ Telegram nuốt (thường 4–6 MB/s cộng cả bốn tài khoản). Đầy 2 GB rồi
+thì hết chỗ: `receive()` phải đợi mảnh đầu hàng lên xong mới nhận tiếp.
+
+Đó **là thiết kế**, không phải lỗi — không chặn thì cả tệp 58 GB chui vào RAM
+hoặc ổ đĩa. Nhưng nó lý giải đúng thứ người dùng nhìn thấy: chạy phà phà tới
+khoảng 2 GB rồi khựng một nhịp, rồi lại chạy. Từ đó trở đi, tốc độ nhận **bằng
+đúng tốc độ đẩy lên Telegram** — vì không thể khác được.
+
+Muốn khựng ngắn lại thì có hai nút, và chúng kéo về hai hướng khác nhau:
+
+| Chỉnh gì | Tác dụng | Giá phải trả |
+|---|---|---|
+| Tăng **số mảnh song song** | Nhiều tài khoản đẩy cùng lúc → thoát nhanh hơn, ít chạm ngưỡng hơn | Đệm to hơn bấy nhiêu lần (RAM hoặc đĩa) |
+| Giảm **cỡ mảnh** | Mỗi nhịp đợi ngắn hơn, chia đều ra nên mượt hơn | Nhiều mảnh hơn → nhiều lượt gọi Telegram hơn |
+
+> **Cái đáng sửa không phải chỗ nghẽn, mà chỗ nó câm.**
+>
+> `receive()` giữ `mu_` trong suốt lúc đứng đợi — mà `progress()` cũng xin đúng
+> cái khoá đó. Nên trong cả nhịp đợi ấy **không ai hỏi được tiến độ**: trang web
+> đứng hình, và vì `/api/uploads` duyệt qua từng phiên, danh sách tải lên của
+> *mọi* phiên khác treo theo. Nhìn hệt như máy chủ chết.
+>
+> Đo bằng phép kiểm chặn thật: trong một lượt tải, người hỏi tiến độ liên tục
+> chỉ chen được **3 lượt**, lượt lâu nhất **1196 ms**. Sau khi tách ra một ảnh
+> chụp riêng có khoá riêng (`tienDoMu_`, không bao giờ giữ trong lúc đợi thứ gì):
+> **353 lượt, lượt lâu nhất 0 ms**. Thứ tự khoá là `mu_ → tienDoMu_`, một chiều,
+> nên không có đường nào kẹt ngược.
+>
+> Và vì đã hỏi được thì nói luôn cho biết: trước khi `join()`, phiên đăng ký
+> `waiting_chunk` — giao diện đổi thành **⏳ Đệm đầy — đợi mảnh N lên xong**
+> (hoặc *Đang đẩy nốt mảnh N lên Telegram* khi đã nhận đủ tệp). Thanh thứ hai
+> vẫn nhích, vì các mảnh khác vẫn đang bay thật.
+>
+> Bài học lặp lại lần thứ ba trong dự án này: **một cái khoá ôm cả đường chậm
+> lẫn đường hỏi-đáp thì đường hỏi-đáp chết theo đường chậm.**
+
 ### Nói cho đúng màu
 
 Cả hai họ lỗi trên đều là "đang xoay xở", không phải "hỏng". Nhưng người dùng

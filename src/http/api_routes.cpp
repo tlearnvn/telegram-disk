@@ -843,6 +843,7 @@ void registerApiRoutes(HttpServer& server, app::App& app) {
         j.set("chunk_total", static_cast<int64_t>(p.chunkTotal));
         j.set("speed", p.speedBytesPerSecond);
         j.set("account", p.currentAccount);
+        j.set("waiting_chunk", static_cast<int64_t>(p.waitingChunk));
         res.setJson(j);
     });
 
@@ -934,6 +935,7 @@ void registerApiRoutes(HttpServer& server, app::App& app) {
             j.set("state_text", std::string(storage::uploadStateNameVi(p.state)));
             j.set("message", p.message);
             j.set("account", p.currentAccount);
+            j.set("waiting_chunk", static_cast<int64_t>(p.waitingChunk));
             j.set("speed", p.speedBytesPerSecond);
             j.set("speed_text", formatSpeed(p.speedBytesPerSecond));
             j.set("eta_seconds", p.etaSeconds);

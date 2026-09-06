@@ -194,6 +194,26 @@ hai lớp chính là số mảnh đang bay, và con số xanh `↑ … đã lên
 bao nhiêu. Nhờ vậy lúc thanh chạm 100% mà vẫn còn vài GB đang đẩy, bạn vẫn thấy
 nó nhích chứ không tưởng máy treo.
 
+#### Chạy phà phà rồi khựng một nhịp — có sao không?
+
+**Không sao, và nó phải như vậy.** Vùng đệm chứa được đúng
+`số mảnh song song × cỡ mảnh` — 4 mảnh 512 MB là 2 GB. Mạng nội bộ đổ vào nhanh
+hơn Telegram nuốt, nên 2 GB đầu chạy rất nhanh; đầy rồi thì hết chỗ, máy chủ
+phải đợi mảnh đầu hàng lên xong mới nhận tiếp. Từ đó trở đi tốc độ nhận **bằng
+đúng tốc độ đẩy lên Telegram**, không thể nhanh hơn.
+
+Lúc đó dòng chữ vàng nói rõ đang chờ ai:
+
+> ⏳ **Đệm đầy — đợi mảnh 4 lên xong**
+
+Nếu không có dòng này thì đó mới là chuyện lạ. Muốn khựng ngắn lại:
+
+- **Tăng Số mảnh song song** — nhiều tài khoản đẩy cùng lúc, thoát nhanh hơn.
+  Đổi lại vùng đệm to lên bấy nhiêu lần.
+- **Giảm Cỡ mảnh** — mỗi nhịp đợi ngắn hơn nên mượt hơn, đổi lại nhiều mảnh hơn.
+
+Cả hai đều ở [Cài đặt → Lưu trữ](#số-mảnh-song-song).
+
 Xong thì thẻ chuyển sang **Hoàn tất** và tự biến mất sau vài giây:
 
 ![Tải lên hoàn tất](anh/09-tai-len-hoan-tat.png)

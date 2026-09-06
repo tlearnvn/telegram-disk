@@ -82,6 +82,9 @@ struct UploadProgress {
     int64_t etaSeconds = 0;
     int ownerId = 0;
     int64_t fileId = 0;
+    // >0 nghĩa là dòng vào đang bị chặn để đợi mảnh số này lên xong (vùng đệm
+    // đã đầy). Không phải lỗi — nhưng là lý do con số nhận vào ngừng nhảy.
+    int waitingChunk = 0;
 };
 
 class UploadManager;
@@ -178,6 +181,18 @@ private:
     // Nếu có mảnh hỏng thì lùi mốc nhận về đúng tiền tố liền mạch đã đẩy xong.
     bool thuHetManh(std::string& error);
 
+    // Chép trạng thái hiển thị sang ảnh chụp cho progress(). Giả định caller
+    // giữ mu_.
+    void capNhatTienDo();
+
+    // Đặt sau mỗi `lock_guard(mu_)`: thoát hàm bằng đường nào thì ảnh chụp cũng
+    // được cập nhật. receive() có gần chục đường thoát nên đây là cách duy nhất
+    // không sót đường nào.
+    struct DangTienDo {
+        UploadSession* s;
+        ~DangTienDo() { s->capNhatTienDo(); }
+    };
+
     UploadManager& manager_;
     std::string id_;
     int ownerId_ = 0;
@@ -227,11 +242,41 @@ private:
     std::atomic<bool> cancelled_{false};
     std::atomic<bool> busy_{false};
     std::atomic<int64_t> lastActivity_{0};
+    // Số hiệu (đếm từ 1) của mảnh mà dòng vào đang đứng đợi vì vùng đệm đã đầy;
+    // 0 là không đợi ai cả. Đợi ở đây là trạng thái BÌNH THƯỜNG của đẩy song
+    // song — nó chỉ có nghĩa "đã đệm đủ số mảnh cho phép, giờ chạy đúng nhịp
+    // Telegram" — nhưng phải nói ra, không thì người dùng thấy số ngừng nhảy và
+    // tưởng máy treo.
+    std::atomic<int> manhDangDoi_{0};
     UploadState state_ = UploadState::Preparing;
     std::string message_;
     std::string currentAccount_;
     int64_t startedAt_ = 0;
     int64_t startedMonotonic_ = 0;
+
+    // --- Ảnh chụp để trả lời "tiến độ tới đâu rồi?" --------------------------
+    //
+    // Vì sao phải có bản sao riêng thay vì đọc thẳng các trường ở trên:
+    // receive() giữ mu_ trong SUỐT lúc nó đứng đợi mảnh đầu hàng lên xong khi
+    // vùng đệm đầy — mà đợi ở đây tính bằng phút, vì đó là thời gian thật để
+    // 512 MB bò lên Telegram. Nếu progress() cũng phải giành mu_ thì suốt lúc
+    // đó không ai hỏi được tiến độ: trang web đứng hình, và /api/uploads duyệt
+    // qua từng phiên nên danh sách tải lên của MỌI phiên khác treo theo.
+    //
+    // tienDoMu_ chỉ được giữ đúng mấy dòng gán chuỗi, không bao giờ giữ trong
+    // lúc đợi thứ gì. Thứ tự khoá là mu_ → tienDoMu_, không bao giờ ngược lại.
+    struct AnhChupTienDo {
+        std::string name;
+        std::string targetFolder;
+        std::string message;
+        std::string currentAccount;
+        uint64_t totalSize = 0;
+        int chunkIndex = 0;
+        int chunkTotal = 0;
+        UploadState state = UploadState::Preparing;
+    };
+    mutable std::mutex tienDoMu_;
+    AnhChupTienDo anhChup_;
 };
 
 struct UploadInitRequest {

@@ -214,23 +214,41 @@ std::string UploadSession::targetKey() const {
     return normalizeVirtualPath(targetFolderPath_ + "/" + name_);
 }
 
+void UploadSession::capNhatTienDo() {
+    std::lock_guard<std::mutex> lk(tienDoMu_);
+    anhChup_.name = name_;
+    anhChup_.targetFolder = targetFolderPath_;
+    anhChup_.message = message_;
+    anhChup_.currentAccount = currentAccount_;
+    anhChup_.totalSize = totalSize_;
+    anhChup_.chunkIndex = chunkIndex_;
+    anhChup_.chunkTotal = chunkTotal_;
+    anhChup_.state = state_;
+}
+
 UploadProgress UploadSession::progress() const {
-    std::lock_guard<std::mutex> lk(mu_);
     UploadProgress p;
+    {
+        // CHỈ khoá ảnh chụp. Đây là điểm mấu chốt: hỏi tiến độ không bao giờ
+        // được đứng đợi theo dòng vào, kẻo lúc nghẽn là cả giao diện chết cứng.
+        std::lock_guard<std::mutex> lk(tienDoMu_);
+        p.name = anhChup_.name;
+        p.targetFolder = anhChup_.targetFolder;
+        p.totalSize = anhChup_.totalSize;
+        p.chunkIndex = anhChup_.chunkIndex;
+        p.chunkTotal = anhChup_.chunkTotal;
+        p.state = anhChup_.state;
+        p.message = anhChup_.message;
+        p.currentAccount = anhChup_.currentAccount;
+    }
+    // id_, ownerId_ và startedAt_ đặt một lần lúc dựng rồi thôi, đọc thẳng được.
     p.id = id_;
-    p.name = name_;
-    p.targetFolder = targetFolderPath_;
-    p.totalSize = totalSize_;
     p.receivedBytes = receivedBytes_.load();
     p.storedBytes = storedBytes_.load();
-    p.chunkIndex = chunkIndex_;
-    p.chunkTotal = chunkTotal_;
-    p.state = state_;
-    p.message = message_;
-    p.currentAccount = currentAccount_;
     p.startedAt = startedAt_;
     p.updatedAt = lastActivity_.load();
     p.ownerId = ownerId_;
+    p.waitingChunk = manhDangDoi_.load();
 
     int64_t elapsed = monotonicMillis() - startedMonotonic_;
     if (elapsed > 0) p.speedBytesPerSecond = static_cast<double>(p.receivedBytes) * 1000.0 /
@@ -373,7 +391,17 @@ bool UploadSession::thuMotManh(std::string& error) {
     if (dangBay_.empty()) return true;
     std::unique_ptr<ManhBay> manh = std::move(dangBay_.front());
     dangBay_.pop_front();
-    if (manh->luong.joinable()) manh->luong.join();
+    if (manh->luong.joinable()) {
+        // NÓI RA trước khi đứng đợi, rồi mới đợi. Cú join này là chỗ tốn thời
+        // gian duy nhất trong cả đường nhận: nó đợi đúng bằng thời gian thật để
+        // một mảnh bò lên Telegram — tính bằng phút với mảnh 512 MB. Suốt lúc
+        // đó dòng vào đứng im, nên nếu không đăng ký trước một câu giải thích
+        // thì mọi con số trên giao diện cứng lại mà chẳng ai biết vì sao.
+        manhDangDoi_.store(manh->index + 1);
+        capNhatTienDo();
+        manh->luong.join();
+        manhDangDoi_.store(0);
+    }
 
     // Một khi đã có mảnh hỏng thì MỌI mảnh sau nó đều mất tính liền mạch — kể
     // cả những mảnh tự nó đẩy xong ngon lành, vì giữa chúng và phần đã chốt có
@@ -510,6 +538,7 @@ bool UploadSession::receive(const uint8_t* data, size_t len, std::string& error)
         return false;
     }
     std::lock_guard<std::mutex> lk(mu_);
+    DangTienDo dang{this};
     if (state_ == UploadState::Failed || state_ == UploadState::Cancelled) {
         error = message_.empty() ? "Phiên tải lên không còn hoạt động" : message_;
         return false;
@@ -589,6 +618,7 @@ bool UploadSession::receive(const uint8_t* data, size_t len, std::string& error)
 
 bool UploadSession::complete(db::FileEntry& out, std::string& error) {
     std::lock_guard<std::mutex> lk(mu_);
+    DangTienDo dang{this};
     if (cancelled_.load()) {
         error = "Phiên tải lên đã bị huỷ";
         return false;
@@ -775,6 +805,7 @@ void UploadSession::rollback() {
 
 void UploadSession::chotSoTruocKhiNoi() {
     std::lock_guard<std::mutex> lk(mu_);
+    DangTienDo dang{this};
     if (dangBay_.empty()) return;
     std::string error;
     if (!thuHetManh(error)) {
@@ -787,6 +818,7 @@ void UploadSession::chotSoTruocKhiNoi() {
 void UploadSession::cancel(const std::string& reason) {
     if (cancelled_.exchange(true)) return;
     std::lock_guard<std::mutex> lk(mu_);
+    DangTienDo dang{this};
     state_ = UploadState::Cancelled;
     message_ = reason.empty() ? "Đã huỷ theo yêu cầu" : reason;
     // Phải ĐỢI luồng nền dừng hẳn trước khi dọn: cờ cancelled_ ở trên làm chúng
@@ -1123,6 +1155,7 @@ UploadInitResult UploadManager::begin(const UploadInitRequest& req) {
                 : static_cast<int>((req.totalSize + session->chunkSize_ - 1) /
                                    session->chunkSize_);
         session->state_ = UploadState::Preparing;
+        session->capNhatTienDo();
     }
 
     // chonCachDay() phải chạy NGOÀI session->mu_: nó cần đếm RAM các phiên khác
