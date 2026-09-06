@@ -205,8 +205,15 @@ Bấm **Huỷ** trên thẻ đang chạy. Những mảnh đã đẩy lên Telegr
 
 ![Đã huỷ tải lên](anh/10-da-huy-tai-len.png)
 
-Đóng tab giữa chừng cũng vậy: trình duyệt báo cho máy chủ trước khi đóng. Còn
-nếu rớt mạng hẳn thì phiên bị bỏ dở sẽ tự được dọn sau 30 phút.
+**Đóng tab hay bấm F5 giữa chừng thì KHÔNG mất gì.** Trình duyệt chỉ hỏi lại cho
+chắc, còn phần đã đẩy lên Telegram vẫn nằm nguyên trên máy chủ. Mở lại trang,
+chọn đúng tệp đó, nó tự nối tiếp từ chỗ dừng và báo `Nối tiếp từ …`. Phiên được
+giữ 30 phút; quá hạn không ai quay lại thì mới dọn.
+
+> Bản trước bản này gửi lệnh huỷ ngay lúc rời trang — mà lại gửi **trước** khi
+> hộp thoại "Rời khỏi trang?" kịp hiện. Bấm F5 rồi chọn "Ở lại" thì lượt tải đã
+> chết ở máy chủ từ lúc nào, còn giao diện vẫn tưởng đang chạy. Đóng tab thật
+> thì mất trắng phần đã đẩy. Đã sửa: rời trang không huỷ gì cả.
 
 ### Tệp lớn hơn RAM
 

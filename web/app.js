@@ -1006,12 +1006,21 @@ async function taiMotTep(file, chinhSach = 'ask') {
   // Chuyển sang theo dõi bằng mã phiên thật.
   S.phienTaiLen.delete(theoDoi.id);
   theoDoi.id = init.upload_id;
-  theoDoi.trangThai = 'Đang tải lên';
   S.phienTaiLen.set(theoDoi.id, theoDoi);
-  veDanhSachTaiLen();
 
+  // Máy chủ còn giữ phiên bỏ dở của đúng tệp này (lần trước đóng tab, bấm F5,
+  // hay trình duyệt sập) thì cắt tệp từ chỗ đó, đừng gửi lại từ byte 0.
   const buoc = Math.max(256 * 1024, Number(init.browser_chunk_size) || 8 * 1024 * 1024);
-  let offset = 0;
+  let offset = init.resumed ? Math.min(Number(init.resume_from) || 0, file.size) : 0;
+  if (offset > 0) {
+    theoDoi.daGui = offset;
+    theoDoi.trangThai = `Nối tiếp từ ${dungLuong(offset)}`;
+    thongBao('Nối tiếp lượt tải dở', `${file.name} — đã có ${dungLuong(offset)} trên máy chủ`,
+             'ok', 5);
+  } else {
+    theoDoi.trangThai = 'Đang tải lên';
+  }
+  veDanhSachTaiLen();
 
   try {
     let luotHong = 0;   // số lần hỏng liên tiếp của khối hiện tại
@@ -1382,17 +1391,21 @@ async function dongBoTaiLen() {
   } catch (e) { /* im lặng */ }
 }
 
-// Cảnh báo khi đóng tab lúc đang tải.
+// Cảnh báo khi đóng tab lúc đang tải — CHỈ cảnh báo, không huỷ gì cả.
+//
+// Bản trước gửi lệnh huỷ ngay trong hàm này, TRƯỚC khi hộp thoại "Rời khỏi
+// trang?" kịp hiện ra. Hai hậu quả, cái nào cũng tệ:
+//   • Bấm F5 rồi chọn "Ở lại" thì phiên đã chết ở máy chủ từ lúc nào, mà giao
+//     diện vẫn tưởng đang chạy — nó ngồi thử lại rồi báo lỗi vu vơ.
+//   • Đóng tab thật thì máy chủ gỡ sạch mảnh đã đẩy. Đóng tab đâu có nghĩa là
+//     "vứt giùm tui 512 MB" — nó là lỡ tay, là F5, là trình duyệt sập.
+//
+// Nay để phiên nằm im. Mọi đường hỏng khác (rớt mạng, Telegram lỗi, WebDAV đứt)
+// đều xử lý y hệt: giữ phiên, ai không quay lại thì bộ quét dọn sau 30 phút.
+// Quay lại chọn đúng tệp đó thì /api/upload/init tự nối tiếp từ chỗ dừng.
 window.addEventListener('beforeunload', (e) => {
   const dangChay = Array.from(S.phienTaiLen.values()).filter((t) => !t.lop && !t.ngoai);
   if (!dangChay.length) return;
-  for (const t of dangChay) {
-    try {
-      navigator.sendBeacon(`/api/upload/${t.id}/cancel`,
-        new Blob([JSON.stringify({ reason: 'Đóng trình duyệt' })],
-                 { type: 'application/json' }));
-    } catch (err) { /* bỏ qua */ }
-  }
   e.preventDefault();
   e.returnValue = '';
 });

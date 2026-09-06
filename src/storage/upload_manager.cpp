@@ -960,6 +960,45 @@ UploadInitResult UploadManager::begin(const UploadInitRequest& req) {
         return result;
     }
 
+    // Còn phiên bỏ dở của đúng tệp này thì nối tiếp, đừng bắt đầu lại từ 0.
+    // Đây chính là thứ WebDAV vẫn dùng để chịu được rớt mạng; đường trình duyệt
+    // trước đây không dùng tới, nên đóng tab hay bấm F5 là mất trắng phần đã đẩy.
+    //
+    // Không giành quyền (claim) ở đây: đường trình duyệt gọi init MỘT lần rồi
+    // gửi rất nhiều lượt PUT, giữ quyền suốt chừng đó là khoá chết phiên. Hai
+    // tab cùng gửi một tệp vẫn an toàn nhờ chốt X-Upload-Offset — lệch là 409.
+    if (req.totalSize > 0) {
+        std::string key = normalizeVirtualPath(req.targetFolderPath + "/" + cleanName);
+        std::shared_ptr<UploadSession> cu;
+        {
+            std::lock_guard<std::mutex> lk(mu_);
+            for (auto& kv : sessions_) {
+                auto& s = kv.second;
+                if (!s || s->cancelled()) continue;
+                UploadProgress p = s->progress();
+                if (p.ownerId != req.ownerId) continue;
+                if (p.state != UploadState::Receiving) continue;
+                if (p.receivedBytes == 0 || p.receivedBytes >= req.totalSize) continue;
+                if (s->totalSize() != req.totalSize) continue;
+                if (s->targetKey() != key) continue;
+                cu = s;
+                break;
+            }
+        }
+        if (cu) {
+            // Chốt sổ ngoài khoá: bước này join luồng nền, có thể lâu.
+            cu->chotSoTruocKhiNoi();
+            result.ok = true;
+            result.uploadId = cu->id();
+            result.resumed = true;
+            result.resumeFrom = cu->receivedBytes();
+            result.message = "Nối tiếp phiên bỏ dở từ " + formatBytes(result.resumeFrom) + ".";
+            LOG_INFO(kTag, "[%s] Nối tiếp '%s' từ %s thay vì tải lại từ đầu",
+                     cu->id().c_str(), cleanName.c_str(), formatBytes(result.resumeFrom).c_str());
+            return result;
+        }
+    }
+
     int64_t parentId = 0;
     std::string error;
     if (!ensureFolder(req.targetFolderPath, req.ownerId, parentId, error)) {

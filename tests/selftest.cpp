@@ -1325,6 +1325,110 @@ void testHongLucHoanTatKhongXoaMang() {
 }
 
 // ---------------------------------------------------------------------------
+// Bỏ ngang rồi chọn lại đúng tệp đó thì phải NỐI TIẾP, không tải lại từ đầu.
+//
+// Đóng tab hay bấm F5 giữa chừng là chuyện thường. Trước đây trình duyệt gửi
+// lệnh huỷ lúc rời trang, máy chủ gỡ sạch mảnh đã đẩy — 512 MB bay màu vì một
+// phím F5. Nay phiên được giữ lại, và begin() nhận ra nó.
+void testChonLaiThiNoiTiep() {
+    nhom("Chọn lại tệp bỏ dở thì nối tiếp");
+
+    std::string thuMuc = "ttd_test_noi_tiep";
+    removeDirectoryRecursive(thuMuc);
+    ensureDirectoryExists(thuMuc);
+    std::string loi;
+    db::DatabaseConfig dcfg;
+    dcfg.kind = "sqlite";
+    dcfg.sqlitePath = joinPath(thuMuc, "test.db");
+    auto database = db::createDatabase(dcfg, loi);
+    kiem(database != nullptr && database->open(loi) && database->migrate(loi),
+         "dựng CSDL tạm", loi);
+    if (!database) return;
+
+    Config& cfg = Config::instance();
+    auto luuCu = cfg.storage;
+    struct TraLai {
+        Config& c;
+        decltype(luuCu) cu;
+        ~TraLai() { c.storage = cu; }
+    } traLai{cfg, luuCu};
+
+    const uint64_t coManh = 16 * 1024;
+    cfg.storage.chunkSize = coManh;
+    cfg.storage.bufferMode = "memory";
+    cfg.storage.parallelChunks = 1;
+    cfg.storage.spoolDirectory = joinPath(thuMuc, "spool");
+    cfg.storage.deduplicate = false;
+
+    BackendDemSongSong backend;
+    backend.nghiMs = 0;
+    storage::StorageEngine engine(*database, backend, cfg);
+    storage::UploadManager uploads(engine, *database, cfg);
+
+    const uint64_t tong = 8 * coManh;
+    Bytes goc(tong);
+    for (uint64_t i = 0; i < tong; ++i) goc[i] = static_cast<uint8_t>((i * 13 + 5) & 0xff);
+
+    storage::UploadInitRequest ur;
+    ur.name = "phim.mkv";
+    ur.targetFolderPath = "/";
+    ur.totalSize = tong;
+    ur.ownerId = 1;
+    ur.policy = storage::ConflictPolicy::Replace;
+
+    // Lượt 1: gửi được 3 mảnh rồi bỏ ngang — không complete, không cancel.
+    storage::UploadInitResult mo1 = uploads.begin(ur);
+    kiem(mo1.ok && !mo1.resumed, "lượt đầu mở phiên mới, không phải nối tiếp", mo1.error);
+    if (!mo1.ok) return;
+    {
+        auto phien = uploads.find(mo1.uploadId);
+        if (!phien) { kiem(false, "tìm được phiên lượt 1"); return; }
+        uint64_t gui = 3 * coManh;
+        bool oke = true;
+        for (uint64_t off = 0; off < gui && oke; off += 4096)
+            oke = phien->receive(goc.data() + off, 4096, loi);
+        kiem(oke, "gửi được 3 mảnh đầu", loi);
+        kiem(phien->receivedBytes() == gui, "máy chủ nhận đúng 3 mảnh");
+    }
+    int daXoa = backend.soManhBiXoa.load();
+
+    // Lượt 2: chọn LẠI đúng tệp đó — phải nhận ra phiên cũ.
+    storage::UploadInitResult mo2 = uploads.begin(ur);
+    kiem(mo2.ok, "lượt hai mở được", mo2.error);
+    kiem(mo2.resumed, "nhận ra phiên bỏ dở, không mở phiên mới");
+    kiem(mo2.uploadId == mo1.uploadId, "trả về ĐÚNG phiên cũ chứ không tạo phiên khác");
+    kiem(mo2.resumeFrom == 3 * coManh, "báo đúng vị trí gửi tiếp",
+         std::to_string(mo2.resumeFrom));
+    kiem(backend.soManhBiXoa.load() == daXoa,
+         "bỏ ngang rồi chọn lại KHÔNG làm mất mảnh nào");
+
+    // Gửi nốt phần còn lại rồi hoàn tất — nội dung phải nguyên vẹn.
+    {
+        auto phien = uploads.find(mo2.uploadId);
+        if (!phien) { kiem(false, "tìm được phiên lượt 2"); return; }
+        bool oke = true;
+        for (uint64_t off = mo2.resumeFrom; off < tong && oke; off += 4096) {
+            size_t n = static_cast<size_t>(std::min<uint64_t>(4096, tong - off));
+            oke = phien->receive(goc.data() + off, n, loi);
+        }
+        kiem(oke, "gửi nốt phần còn lại", loi);
+    }
+    db::FileEntry ra;
+    kiem(uploads.complete(mo2.uploadId, ra, loi), "hoàn tất", loi);
+
+    Bytes doc;
+    kiem(engine.readFileRange(ra, 0, tong, doc, loi) == tong, "đọc lại đủ byte", loi);
+    kiem(doc == goc, "tệp ghép từ hai lượt khớp từng byte với tệp gốc");
+
+    // Tệp đã xong thì lần sau phải là phiên MỚI, đừng nối vào tệp đã hoàn tất.
+    storage::UploadInitResult mo3 = uploads.begin(ur);
+    kiem(mo3.ok && !mo3.resumed, "tệp đã xong thì lượt sau mở phiên mới", mo3.error);
+
+    database->close();
+    removeDirectoryRecursive(thuMuc);
+}
+
+// ---------------------------------------------------------------------------
 void testLoiBaoCho() {
     nhom("Nhận diện lỗi \"chờ chút rồi làm lại\"");
     int giay = -1;
@@ -1590,6 +1694,7 @@ int main() {
     testDaySongSong();
     testMocNoiLaiKhiManhGiuaHong();
     testHongLucHoanTatKhongXoaMang();
+    testChonLaiThiNoiTiep();
     testLoiBaoCho();
     testThongBaoTaiKhoan();
     testCauHinh();

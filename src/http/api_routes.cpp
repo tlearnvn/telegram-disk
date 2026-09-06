@@ -717,6 +717,8 @@ void registerApiRoutes(HttpServer& server, app::App& app) {
         j.set("skipped", result.skipped);
         j.set("linked", result.linked);
         j.set("linked_file_id", result.linkedFileId);
+        j.set("resumed", result.resumed);
+        j.set("resume_from", result.resumeFrom);
         j.set("message", result.message);
         Json dups = Json::array();
         for (const auto& d : result.duplicates) {

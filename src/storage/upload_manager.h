@@ -255,6 +255,10 @@ struct UploadInitResult {
     bool skipped = false;       // đã bỏ qua theo chính sách Skip
     bool linked = false;        // đã liên kết tới dữ liệu có sẵn
     int64_t linkedFileId = 0;
+    // Nối tiếp một phiên bỏ dở của đúng tệp này: máy khách phải bắt đầu gửi từ
+    // byte thứ `resumeFrom` chứ không phải từ 0.
+    bool resumed = false;
+    uint64_t resumeFrom = 0;
     std::string message;
     std::string error;
 };
