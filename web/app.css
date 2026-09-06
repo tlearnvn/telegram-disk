@@ -646,7 +646,8 @@ html[data-theme="dark"] .ft-presentation { background: #32211a; }
 .upload-state.cancel { background: var(--nen-3); color: var(--chu-nhat); }
 /* Mất kết nối, đang đếm ngược để thử lại — chưa hỏng hẳn nên không tô đỏ. */
 .upload-state.warn { background: var(--vang-nhat); color: var(--vang); }
-.progress { height: 8px; border-radius: 999px; background: var(--nen-3); overflow: hidden; }
+.progress { height: 8px; border-radius: 999px; background: var(--nen-3); overflow: hidden;
+  position: relative; }
 .progress i {
   display: block; height: 100%; border-radius: 999px;
   background: linear-gradient(90deg, var(--chinh), var(--tim));
@@ -655,8 +656,25 @@ html[data-theme="dark"] .ft-presentation { background: #32211a; }
 .progress.err i { background: var(--do); }
 .progress.done i { background: var(--xanh-la); }
 .progress.warn i { background: var(--vang); }
+
+/* Lớp thứ hai: phần đã THẬT SỰ nằm trên Telegram. Nằm đè lên lớp "đã nhận" nên
+   khoảng chênh giữa hai lớp chính là phần đang bay — thứ mà trước đây thanh
+   tiến độ giấu đi, khiến nó chạm 100% rồi đứng im hàng phút. */
+.progress b {
+  position: absolute; left: 0; top: 0; height: 100%; border-radius: 999px;
+  background: linear-gradient(90deg, var(--xanh-la), var(--chinh));
+  transition: width .25s ease;
+}
+.progress.err b { background: var(--do); }
+.progress.warn b { background: var(--vang); }
+.progress.done b { background: var(--xanh-la); }
+/* Phần đã nhận nhưng chưa lên tới nơi: mờ đi để thấy rõ nó chưa an toàn. */
+.progress.co-hang i { opacity: .42; }
 .upload-meta { display: flex; justify-content: space-between; gap: 12px;
   margin-top: 7px; font-size: 12px; color: var(--chu-nhat); flex-wrap: wrap; }
+/* Con số "đã lên Telegram" — cùng màu với lớp đậm của thanh tiến độ để mắt tự
+   nối hai thứ đó với nhau mà không cần chú thích. */
+.upload-meta .cho-len { color: var(--xanh-la); font-weight: 600; }
 
 /* ── Tài khoản Telegram ─────────────────────────────────────────────────── */
 .account-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr));

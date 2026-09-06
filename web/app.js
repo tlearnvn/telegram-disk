@@ -1096,6 +1096,7 @@ async function taiMotTep(file, chinhSach = 'ask') {
       luotHong = 0;
       offset = den;
       theoDoi.daGui = kq.received || offset;
+      if (typeof kq.stored === 'number') theoDoi.daLen = kq.stored;
       theoDoi.taiKhoan = kq.account || '';
       theoDoi.mangHienTai = (kq.chunk_index || 0) + 1;
       theoDoi.tongMang = kq.chunk_total || 0;
@@ -1235,9 +1236,24 @@ function veDanhSachTaiLen() {
   for (const t of list) {
     if (dangHoatDong(t)) dangChay++;
     const pct = t.tong ? Math.min(100, (t.daGui / t.tong) * 100) : 0;
+    // Phiên do máy khách khác chạy (rclone qua WebDAV) thì tab này không biết nó
+    // bắt đầu lúc nào — batDau chỉ là mốc giả đặt lúc thấy nó lần đầu, nên tự
+    // chia ra sẽ cho những con số kiểu "28 GB/s". Máy chủ tính sẵn tốc độ thật
+    // từ thời điểm mở phiên; dùng số của máy chủ.
     const giay = (Date.now() - t.batDau) / 1000;
-    const toc = giay > 0.4 ? t.daGui / giay : 0;
+    const toc = t.ngoai ? (Number(t.tocMayChu) || 0)
+                        : (giay > 0.4 ? t.daGui / giay : 0);
     const conLai = toc > 1 && t.tong > t.daGui ? (t.tong - t.daGui) / toc : 0;
+
+    // Hai mốc khác nhau, và ở chế độ đẩy song song chúng lệch nhau rất xa:
+    //   daGui = máy chủ đã NHẬN được bấy nhiêu (nằm trong vùng đệm)
+    //   daLen = bấy nhiêu đã THẬT SỰ nằm trên Telegram
+    // Trước đây thanh chỉ vẽ daGui, nên nó chạm 100% rồi đứng im hàng phút
+    // trong khi vài GB còn đang bay — nhìn y như treo.
+    const daLen = Math.min(Number(t.daLen) || 0, t.daGui || 0);
+    const pctLen = t.tong ? Math.min(100, (daLen / t.tong) * 100) : 0;
+    // Lệch quá 1% mới coi là "đang xếp hàng" — tránh nhấp nháy vì lệch vụn.
+    const dangXepHang = dangHoatDong(t) && t.tong > 0 && (t.daGui - daLen) > t.tong / 100;
 
     box.appendChild(el('div', { class: 'upload-item' },
       el('div', { class: 'upload-top' },
@@ -1254,10 +1270,16 @@ function veDanhSachTaiLen() {
                 veDanhSachTaiLen();
               },
             }, '×')),
-      el('div', { class: 'progress ' + (t.lop || '') },
-        el('i', { style: `width:${pct}%` })),
+      el('div', { class: 'progress ' + (t.lop || '') + (dangXepHang ? ' co-hang' : '') },
+        el('i', { style: `width:${pct}%` }),
+        el('b', { style: `width:${pctLen}%`,
+                  title: `Đã nằm trên Telegram: ${dungLuong(daLen)}` })),
       el('div', { class: 'upload-meta' },
         el('span', {}, `${dungLuong(t.daGui)} / ${dungLuong(t.tong)} (${pct.toFixed(1)}%)`),
+        // Chỉ nói tới Telegram khi hai con số thật sự lệch nhau. Ở chế độ đẩy
+        // tuần tự chúng gần như trùng, thêm vào chỉ tổ rối mắt.
+        el('span', { class: dangXepHang ? 'cho-len' : '' },
+           dangXepHang ? `↑ ${dungLuong(daLen)} đã lên Telegram` : ''),
         el('span', {}, t.tongMang ? `Mảnh ${t.mangHienTai}/${t.tongMang}` : ''),
         el('span', {}, t.taiKhoan ? `Qua: ${t.taiKhoan}` : ''),
         el('span', {}, toc ? tocDo(toc) : ''),
@@ -1324,6 +1346,8 @@ async function dongBoTaiLen() {
         cu.ten = u.name;
         cu.tong = u.total;
         cu.daGui = u.received;
+        cu.daLen = u.stored;
+        cu.tocMayChu = u.speed;
         cu.trangThai = u.state_text;
         cu.taiKhoan = u.account;
         cu.mangHienTai = u.chunk_index + 1;
@@ -1331,7 +1355,8 @@ async function dongBoTaiLen() {
         continue;
       }
       S.phienTaiLen.set(u.id, {
-        id: u.id, ten: u.name, tong: u.total, daGui: u.received,
+        id: u.id, ten: u.name, tong: u.total, daGui: u.received, daLen: u.stored,
+        tocMayChu: u.speed,
         trangThai: u.state_text, lop: '', batDau: Date.now() - 1000,
         taiKhoan: u.account, mangHienTai: u.chunk_index + 1, tongMang: u.chunk_total,
         ngoai: true,

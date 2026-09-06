@@ -188,6 +188,12 @@ mảnh thứ mấy, tài khoản Telegram nào đang gửi, tốc độ và th�
 
 ![Tiến độ tải lên](anh/08-tien-do-tai-len.png)
 
+Khi bật **Số mảnh song song**, thanh tiến độ có **hai lớp**: lớp mờ là phần máy
+chủ đã nhận, lớp đậm là phần đã **thật sự nằm trên Telegram**. Khoảng chênh giữa
+hai lớp chính là số mảnh đang bay, và con số xanh `↑ … đã lên Telegram` nói rõ
+bao nhiêu. Nhờ vậy lúc thanh chạm 100% mà vẫn còn vài GB đang đẩy, bạn vẫn thấy
+nó nhích chứ không tưởng máy treo.
+
 Xong thì thẻ chuyển sang **Hoàn tất** và tự biến mất sau vài giây:
 
 ![Tải lên hoàn tất](anh/09-tai-len-hoan-tat.png)
