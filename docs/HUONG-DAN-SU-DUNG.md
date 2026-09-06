@@ -304,7 +304,7 @@ Những mục hay dùng nhất:
 | **Kích thước mảnh** | 500 MB | Mỗi mảnh gửi lên Telegram lớn bao nhiêu. Tối đa ~1900 MB |
 | **Chế độ đệm** | `stream` | `stream` tốn rất ít RAM · `memory` giữ trọn mảnh trong RAM · `disk` ghi ra tệp tạm |
 | **Cỡ khối trình duyệt gửi** | 8 MB | Mỗi lần trình duyệt gửi lên máy chủ bao nhiêu byte |
-| **Số mảnh song song** | 2 | Bao nhiêu mảnh đẩy cùng lúc, mỗi mảnh một tài khoản. Xem ngay bên dưới |
+| **Số mảnh song song** | 1 | Bao nhiêu mảnh đẩy cùng lúc, mỗi mảnh một tài khoản. Xem ngay bên dưới |
 | **Khử trùng lặp** | Bật | Tệp trùng nội dung dùng lại dữ liệu cũ |
 | **Bộ đệm tải xuống** | 256 MB | Đệm khối 1 MB giúp tua video mượt. **Đây cũng chính là mức RAM ứng dụng dùng khi có người tải tệp** — máy ít RAM thì hạ xuống 32–64 MB |
 | **Số ngày giữ thùng rác** | 30 | |
@@ -344,9 +344,17 @@ Chỗ đệm đó nằm ở đâu là do **Chế độ đệm** quyết định:
 **Gợi ý:** nhiều tài khoản + tệp lớn thì để **4**, cỡ mảnh **512 MB**, chế độ đệm
 `stream` (máy chủ tự lo phần đĩa). Ổ đĩa cần trống ít nhất 2 GB cho vùng tạm.
 
+Máy chủ **tự hạ xuống tuần tự** nếu thư mục tệp tạm không còn đủ chỗ (nó đòi dư
+thêm 25% cho an toàn) và ghi rõ lý do trong nhật ký — thà chậm còn hơn hết đĩa
+giữa chừng. Tệp tạm sót lại từ lần chạy trước cũng được dọn lúc khởi động.
+
 > Bản trước bản này có nút đó trên giao diện nhưng **không dòng mã nào đọc tới** —
 > chỉnh 2 hay 16 đều đẩy tuần tự y hệt. Nút "Giới hạn RAM cho vùng đệm" cũng vậy.
 > Cả hai nay đã chạy thật.
+>
+> Mặc định vẫn để **1** (tuần tự). Bản 1.1.0 lỡ để mặc định 2, nghĩa là ai nâng
+> cấp cũng bỗng dưng bị ghi vài GB tệp tạm mà không hề yêu cầu. Muốn nhanh thì
+> tự bật — lúc đó bạn biết mình đánh đổi cái gì.
 
 ---
 

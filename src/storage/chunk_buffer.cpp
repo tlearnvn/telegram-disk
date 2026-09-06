@@ -40,9 +40,13 @@ ChunkBuffer::ChunkBuffer(BufferMode mode, uint64_t capacity, std::string spoolPa
         ensureDirectoryExists(parentDirectoryOf(spoolPath_));
         file_ = fsutilOpen(spoolPath_, "w+b");
         if (!file_) {
-            LOG_ERROR(kTag, "Không tạo được tệp tạm %s, chuyển sang chế độ stream",
-                      spoolPath_.c_str());
-            mode_ = BufferMode::Stream;
+            // KHÔNG lặng lẽ tụt về stream. Ở đường đẩy song song, vùng đệm
+            // không có sink (nơi nhận được chỉ định muộn, lúc flush), nên tụt về
+            // stream nghĩa là append() báo một lỗi vô nghĩa còn flush() thì trả
+            // về true — mảnh rỗng được ghi nhận như mảnh đầy. Để nguyên chế độ
+            // disk và không có tệp; append() sẽ báo đúng nguyên nhân.
+            LOG_ERROR(kTag, "Không tạo được tệp tạm %s — kiểm tra quyền ghi và"
+                            " dung lượng trống của thư mục tệp tạm", spoolPath_.c_str());
         }
     }
 }
@@ -103,7 +107,15 @@ bool ChunkBuffer::flushMemory(const SinkFn& sink, std::string& error) {
 }
 
 bool ChunkBuffer::flushDisk(const SinkFn& sink, std::string& error) {
-    if (!file_) return true;
+    if (!file_) {
+        // Không mở được tệp tạm mà lại có byte đã đếm: báo hỏng, đừng trả về
+        // true — trả true là ghi nhận một mảnh rỗng như mảnh đầy đủ.
+        if (buffered_ > 0 || total_ > 0) {
+            error = "Tệp tạm không khả dụng — không đẩy được mảnh";
+            return false;
+        }
+        return true;
+    }
     if (std::fflush(file_) != 0) {
         error = "Không ghi xong tệp tạm";
         return false;
@@ -112,11 +124,28 @@ bool ChunkBuffer::flushDisk(const SinkFn& sink, std::string& error) {
         error = "Không đọc lại được tệp tạm";
         return false;
     }
+    // Đọc lại ĐÚNG số byte đã ghi, không đọc tới hết tệp. Nếu một lượt ghi
+    // trước đó chỉ vào được một nửa rồi máy khách gửi lại, tệp tạm có thể dài
+    // hơn buffered_ — đọc tới EOF là ghép thừa byte vào mảnh, mà mảnh vẫn được
+    // ghi nhận đúng cỡ và đúng băm, nên không chỗ nào báo sai.
     Bytes block(kDiskReadBlock);
-    while (true) {
-        size_t got = std::fread(block.data(), 1, block.size(), file_);
-        if (got == 0) break;
+    uint64_t conLai = buffered_;
+    while (conLai > 0) {
+        size_t muon = static_cast<size_t>(std::min<uint64_t>(block.size(), conLai));
+        size_t got = std::fread(block.data(), 1, muon, file_);
+        if (got == 0) {
+            // Hết tệp sớm hơn số byte đã đếm, hoặc lỗi đọc — cả hai đều là hỏng
+            // thật. Trả về true ở đây là lặng lẽ giao một mảnh thiếu byte.
+            error = std::ferror(file_) ? "Lỗi khi đọc lại tệp tạm"
+                                       : "Tệp tạm ngắn hơn số byte đã ghi";
+            return false;
+        }
         if (!sink(block.data(), got, error)) return false;
+        conLai -= got;
+    }
+    if (std::ferror(file_)) {
+        error = "Lỗi khi đọc lại tệp tạm";
+        return false;
     }
     buffered_ = 0;
     return true;

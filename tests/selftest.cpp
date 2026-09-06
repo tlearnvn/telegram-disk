@@ -1225,6 +1225,106 @@ void testMocNoiLaiKhiManhGiuaHong() {
 }
 
 // ---------------------------------------------------------------------------
+// Hỏng ở bước HOÀN TẤT thì không được xoá sạch mảnh.
+//
+// Đây là cùng một cái bẫy đã ném đi 36 GB, nhưng nấp ở đường khác:
+// UploadManager::complete() gỡ phiên khỏi sessions_ VÔ ĐIỀU KIỆN, kể cả khi
+// hỏng. Gỡ là thả shared_ptr cuối, ~UploadSession() chạy rollback(), rollback()
+// xoá mọi mảnh đã đẩy. Mảnh CUỐI gặp FLOOD_WAIT là mất cả tệp.
+void testHongLucHoanTatKhongXoaMang() {
+    nhom("Hỏng lúc hoàn tất thì giữ mảnh, không dọn");
+
+    std::string thuMuc = "ttd_test_hoan_tat";
+    removeDirectoryRecursive(thuMuc);
+    ensureDirectoryExists(thuMuc);
+    std::string loi;
+    db::DatabaseConfig dcfg;
+    dcfg.kind = "sqlite";
+    dcfg.sqlitePath = joinPath(thuMuc, "test.db");
+    auto database = db::createDatabase(dcfg, loi);
+    kiem(database != nullptr && database->open(loi) && database->migrate(loi),
+         "dựng CSDL tạm", loi);
+    if (!database) return;
+
+    Config& cfg = Config::instance();
+    auto luuCu = cfg.storage;
+    struct TraLai {
+        Config& c;
+        decltype(luuCu) cu;
+        ~TraLai() { c.storage = cu; }
+    } traLai{cfg, luuCu};
+
+    const uint64_t coManh = 32 * 1024;
+    cfg.storage.chunkSize = coManh;
+    cfg.storage.bufferMode = "memory";
+    cfg.storage.parallelChunks = 1;      // tuần tự: bắt đúng mảnh CUỐI
+    cfg.storage.spoolDirectory = joinPath(thuMuc, "spool");
+    cfg.storage.deduplicate = false;
+
+    BackendDemSongSong backend;
+    backend.nghiMs = 0;
+    backend.manhHong = 4;                // mảnh cuối (5 mảnh, đánh số 0..4)
+    storage::StorageEngine engine(*database, backend, cfg);
+    storage::UploadManager uploads(engine, *database, cfg);
+
+    // Cỡ tệp LẺ: bốn mảnh đầy (đóng ngay trong receive) + một mảnh đuôi 1000
+    // byte. Mảnh đuôi chỉ được đóng ở complete() — đó chính là cửa sổ cần thử.
+    const uint64_t tong = 4 * coManh + 1000;
+    Bytes goc(tong, 0x7e);
+
+    storage::UploadInitRequest ur;
+    ur.name = "cuoi.bin";
+    ur.targetFolderPath = "/";
+    ur.totalSize = tong;
+    ur.ownerId = 1;
+    ur.policy = storage::ConflictPolicy::Replace;
+    storage::UploadInitResult init = uploads.begin(ur);
+    kiem(init.ok, "mở được phiên", init.error);
+    if (!init.ok) return;
+
+    auto phien = uploads.find(init.uploadId);
+    if (!phien) { kiem(false, "tìm được phiên"); return; }
+
+    bool oke = true;
+    for (uint64_t off = 0; off < tong && oke; off += 4096) {
+        size_t n = static_cast<size_t>(std::min<uint64_t>(4096, tong - off));
+        oke = phien->receive(goc.data() + off, n, loi);
+    }
+    kiem(oke, "nhận hết dữ liệu, chưa mảnh nào hỏng", loi);
+    kiem(phien->receivedBytes() == tong, "nhận đủ số byte");
+
+    int truoc = backend.soManhBiXoa.load();
+    db::FileEntry ra;
+    bool xong = uploads.complete(init.uploadId, ra, loi);
+    kiem(!xong, "hoàn tất phải thất bại vì mảnh cuối hỏng");
+    kiem(loi.find("RPC_CALL_FAIL") != std::string::npos, "báo đúng nguyên nhân", loi);
+
+    // Phiên phải còn sống để nối lại — lỗi 500 là lỗi tạm thời.
+    auto vanCon = uploads.find(init.uploadId);
+    kiem(vanCon != nullptr, "phiên được giữ lại sau khi hoàn tất hỏng");
+    if (vanCon) {
+        kiem(vanCon->progress().state == storage::UploadState::Receiving,
+             "phiên ở trạng thái nhận được, tức là nối lại được");
+    }
+
+    // ĐÂY mới là phép kiểm thật, và phải THẢ HẾT shared_ptr mới đo được: chính
+    // ~UploadSession() gọi rollback(), nên chừng nào phép kiểm còn cầm một tay
+    // nắm thì mảnh chưa bị xoá và assertion xanh một cách vô nghĩa. Tầng HTTP
+    // cũng giữ một tay nắm y hệt, nên ngoài đời việc dọn xảy ra lúc kết thúc
+    // yêu cầu — muộn hơn, nhưng vẫn xảy ra.
+    phien.reset();
+    vanCon.reset();
+    kiem(backend.soManhBiXoa.load() == truoc,
+         "không xoá mảnh nào kể cả sau khi thả hết tham chiếu tới phiên",
+         "đã xoá " + std::to_string(backend.soManhBiXoa.load() - truoc) + " mảnh");
+    kiem(uploads.find(init.uploadId) != nullptr,
+         "phiên vẫn nằm trong danh sách, chờ lượt gửi sau");
+
+    database->close();
+    removeDirectoryRecursive(thuMuc);
+}
+
+// ---------------------------------------------------------------------------
 void testLoiBaoCho() {
     nhom("Nhận diện lỗi \"chờ chút rồi làm lại\"");
     int giay = -1;
@@ -1489,6 +1589,7 @@ int main() {
     testDoiTaiKhoanKhiDoc();
     testDaySongSong();
     testMocNoiLaiKhiManhGiuaHong();
+    testHongLucHoanTatKhongXoaMang();
     testLoiBaoCho();
     testThongBaoTaiKhoan();
     testCauHinh();

@@ -111,23 +111,50 @@ void UploadManager::chonCachDay(UploadSession& s) {
 
     if (mode == BufferMode::Stream) {
         // Người dùng muốn song song mà lại để stream. Đệm ra ĐĨA là lựa chọn
-        // đúng tinh thần "ít RAM nhất" của họ, chỉ đổi chỗ chứa tạm.
+        // đúng tinh thần "ít RAM nhất" của họ, chỉ đổi chỗ chứa tạm — nhưng
+        // phải xem đĩa có chỗ đã, kẻo hết đĩa giữa chừng làm hỏng cả lượt tải.
+        std::string thuMuc = config_.resolvePath(config_.storage.spoolDirectory);
+        ensureDirectoryExists(thuMuc);
+        uint64_t can = static_cast<uint64_t>(muon) * s.chunkSize_;
+        uint64_t trong = freeDiskSpace(thuMuc);
+        if (trong > 0 && trong < can + can / 4) {   // đòi dư thêm 25% cho an toàn
+            LOG_WARN(kTag,
+                     "[%s] Đệm đĩa cần %s mà %s chỉ còn %s — quay về đẩy TUẦN TỰ"
+                     " (giảm cỡ mảnh hoặc số mảnh song song để bật lại)",
+                     s.id_.c_str(), formatBytes(can).c_str(), thuMuc.c_str(),
+                     formatBytes(trong).c_str());
+            s.cheDoDem_ = BufferMode::Stream;
+            s.soManhSongSong_ = 1;
+            return;
+        }
         mode = BufferMode::Disk;
         LOG_INFO(kTag,
-                 "[%s] Đẩy %d mảnh song song nên cần đệm — dùng đệm ĐĨA tại %s"
-                 " (chế độ stream không tách mảnh ra đẩy song song được)",
-                 s.id_.c_str(), muon, config_.storage.spoolDirectory.c_str());
+                 "[%s] Đẩy %d mảnh song song nên cần đệm — dùng đệm ĐĨA tại %s (cần %s)",
+                 s.id_.c_str(), muon, thuMuc.c_str(), formatBytes(can).c_str());
     } else if (mode == BufferMode::Memory) {
+        // memoryBudget là ngân sách CHUNG cho cả máy chủ, không phải cho từng
+        // phiên: bốn lượt tải cùng lúc mà mỗi lượt tự lấy trọn ngân sách thì
+        // dùng gấp bốn mức người ta đặt, và máy hết RAM.
+        uint64_t dangDung = 0;
+        {
+            std::lock_guard<std::mutex> lk(mu_);
+            for (const auto& kv : sessions_) {
+                if (kv.second && kv.second.get() != &s)
+                    dangDung += kv.second->ramDangGiu();
+            }
+        }
         uint64_t nganSach = config_.storage.memoryBudget;
-        uint64_t vuaDuoc = s.chunkSize_ > 0 ? nganSach / s.chunkSize_ : 0;
+        uint64_t conLai = nganSach > dangDung ? nganSach - dangDung : 0;
+        uint64_t vuaDuoc = s.chunkSize_ > 0 ? conLai / s.chunkSize_ : 0;
         if (vuaDuoc < 1) vuaDuoc = 1;
         if (static_cast<uint64_t>(muon) > vuaDuoc) {
             LOG_WARN(kTag,
-                     "[%s] Đệm RAM %s chỉ chứa nổi %llu mảnh cỡ %s — hạ từ %d xuống %llu mảnh"
-                     " song song (đổi sang đệm đĩa nếu muốn nhiều hơn)",
-                     s.id_.c_str(), formatBytes(nganSach).c_str(),
-                     static_cast<unsigned long long>(vuaDuoc), formatBytes(s.chunkSize_).c_str(),
-                     muon, static_cast<unsigned long long>(vuaDuoc));
+                     "[%s] Đệm RAM còn %s (ngân sách %s, phiên khác đang giữ %s) — chỉ chứa"
+                     " nổi %llu mảnh cỡ %s, hạ từ %d xuống %llu mảnh song song",
+                     s.id_.c_str(), formatBytes(conLai).c_str(), formatBytes(nganSach).c_str(),
+                     formatBytes(dangDung).c_str(), static_cast<unsigned long long>(vuaDuoc),
+                     formatBytes(s.chunkSize_).c_str(), muon,
+                     static_cast<unsigned long long>(vuaDuoc));
             muon = static_cast<int>(vuaDuoc);
         }
     }
@@ -151,6 +178,19 @@ UploadSession::UploadSession(UploadManager& manager, std::string id, int ownerId
 }
 
 UploadSession::~UploadSession() {
+    // Thu hết luồng nền TRƯỚC khi chạm vào bất cứ thứ gì khác. Luồng nền còn
+    // đọc cancelled_/storedBytes_ của phiên, mà thành viên được huỷ theo thứ tự
+    // NGƯỢC với thứ tự khai báo — dangBay_ khai trước hai cái đó nên nó bị huỷ
+    // SAU: tới lúc ManhBay::~ManhBay() join thì luồng đang đọc biến đã chết.
+    // Hiện chưa với tới được vì mọi đường đều thu sạch trước, nhưng chỉ cần một
+    // lần sửa đổi bất cẩn là thành dùng-sau-khi-giải-phóng.
+    cancelled_.store(true);
+    while (!dangBay_.empty()) {
+        std::unique_ptr<ManhBay> manh = std::move(dangBay_.front());
+        dangBay_.pop_front();
+        if (manh->luong.joinable()) manh->luong.join();
+        if (manh->ok) uploaded_.push_back(manh->viTri);
+    }
     if (state_ != UploadState::Completed && !uploaded_.empty()) rollback();
 }
 
@@ -562,8 +602,7 @@ bool UploadSession::complete(db::FileEntry& out, std::string& error) {
             if (!giaoManhChoNen(error)) {
                 std::string bo;
                 thuHetManh(bo);
-                state_ = UploadState::Failed;
-                message_ = error;
+                ghiNhanLoi(error);
                 return false;
             }
         } else if (buffer_) {
@@ -571,8 +610,7 @@ bool UploadSession::complete(db::FileEntry& out, std::string& error) {
             buffer_.reset();
         }
         if (!thuHetManh(error)) {
-            state_ = UploadState::Failed;
-            message_ = error;
+            ghiNhanLoi(error);
             return false;
         }
         // Thu theo thứ tự nên chunkRecords_ đã đúng thứ tự sẵn, nhưng sắp lại
@@ -583,8 +621,7 @@ bool UploadSession::complete(db::FileEntry& out, std::string& error) {
                   });
     } else if (writer_ && chunkWritten_ > 0) {
         if (!closeChunk(error)) {
-            state_ = UploadState::Failed;
-            message_ = error;
+            ghiNhanLoi(error);
             return false;
         }
     } else if (writer_) {
@@ -777,7 +814,32 @@ void UploadSession::cancel(const std::string& reason) {
 //  UploadManager
 // ---------------------------------------------------------------------------
 UploadManager::UploadManager(StorageEngine& engine, db::Database& database, const Config& config)
-    : engine_(engine), db_(database), config_(config) {}
+    : engine_(engine), db_(database), config_(config) {
+    donTepTamBoLai();
+}
+
+// Quét tệp tạm sót lại từ lần chạy trước. Máy chủ bị kill giữa lúc đang đệm thì
+// tệp .tmp nằm lại vĩnh viễn — không phiên nào biết tới chúng nữa. Trước đây
+// chế độ stream không đụng tới thư mục tạm nên chẳng ai để ý; từ khi có đẩy song
+// song thì mỗi lần chết là bỏ lại tới (số mảnh song song × cỡ mảnh).
+void UploadManager::donTepTamBoLai() {
+    std::string thuMuc = config_.resolvePath(config_.storage.spoolDirectory);
+    if (!isDirectory(thuMuc)) return;
+    uint64_t thuHoi = 0;
+    int dem = 0;
+    for (const std::string& ten : listDirectory(thuMuc)) {
+        if (ten.size() < 4 || ten.compare(ten.size() - 4, 4, ".tmp") != 0) continue;
+        std::string duong = joinPath(thuMuc, ten);
+        uint64_t co = fileSizeOf(duong);
+        if (removeFileIfExists(duong)) {
+            thuHoi += co;
+            ++dem;
+        }
+    }
+    if (dem > 0)
+        LOG_INFO(kTag, "Dọn %d tệp tạm bỏ lại từ lần chạy trước, thu hồi %s", dem,
+                 formatBytes(thuHoi).c_str());
+}
 
 UploadManager::~UploadManager() {
     std::lock_guard<std::mutex> lk(mu_);
@@ -1021,9 +1083,14 @@ UploadInitResult UploadManager::begin(const UploadInitRequest& req) {
                 ? 1
                 : static_cast<int>((req.totalSize + session->chunkSize_ - 1) /
                                    session->chunkSize_);
-        chonCachDay(*session);
         session->state_ = UploadState::Preparing;
     }
+
+    // chonCachDay() phải chạy NGOÀI session->mu_: nó cần đếm RAM các phiên khác
+    // nên phải xin mu_ của manager, mà claimResumable() lại khoá theo chiều
+    // ngược lại (mu_ rồi mới tới session->mu_). Hai chiều gặp nhau là treo cứng.
+    // Phiên chưa nằm trong sessions_ nên chưa ai với tới được — không cần khoá.
+    chonCachDay(*session);
 
     {
         std::lock_guard<std::mutex> lk(mu_);
@@ -1067,25 +1134,36 @@ std::shared_ptr<UploadSession> UploadManager::claimResumable(int ownerId,
                                                              uint64_t totalSize) {
     if (totalSize == 0) return nullptr;
     std::string key = normalizeVirtualPath(folder + "/" + name);
-    std::lock_guard<std::mutex> lk(mu_);
-    for (auto& kv : sessions_) {
-        auto& s = kv.second;
-        if (!s || s->cancelled()) continue;
-        UploadProgress p = s->progress();
-        if (p.ownerId != ownerId) continue;
-        if (p.state != UploadState::Receiving) continue;   // chỉ phiên đang dở
-        if (p.receivedBytes == 0 || p.receivedBytes >= totalSize) continue;
-        if (s->totalSize() != totalSize) continue;
-        if (s->targetKey() != key) continue;
-        if (!s->claim()) continue;   // một lượt PUT khác đang dùng
-        // Chốt sổ trước khi giao phiên đi: đợi mọi mảnh đang bay hạ cánh, và
-        // nếu có mảnh hỏng thì lùi mốc nhận về tiền tố liền mạch. Có bước này
-        // thì receivedBytes()/digestSoFar() mà tầng HTTP đọc ngay sau đây mới là
-        // sự thật — không thì nó nối tiếp từ một chỗ chưa hề nằm trên Telegram.
-        s->chotSoTruocKhiNoi();
-        return s;
+    std::shared_ptr<UploadSession> chon;
+    {
+        std::lock_guard<std::mutex> lk(mu_);
+        for (auto& kv : sessions_) {
+            auto& s = kv.second;
+            if (!s || s->cancelled()) continue;
+            UploadProgress p = s->progress();
+            if (p.ownerId != ownerId) continue;
+            if (p.state != UploadState::Receiving) continue;   // chỉ phiên đang dở
+            if (p.receivedBytes == 0 || p.receivedBytes >= totalSize) continue;
+            if (s->totalSize() != totalSize) continue;
+            if (s->targetKey() != key) continue;
+            if (!s->claim()) continue;   // một lượt PUT khác đang dùng
+            chon = s;
+            break;
+        }
     }
-    return nullptr;
+    if (!chon) return nullptr;
+
+    // Chốt sổ NGOÀI khoá của manager. Bước này join luồng nền — có thể mất hàng
+    // phút nếu Telegram đang chậm — mà mu_ lại là khoá mọi find()/complete()/
+    // cancel() và cả vòng hỏi tiến độ đều phải qua. Chốt sổ trong khoá thì một
+    // lượt nối lại làm treo toàn bộ ứng dụng. Phiên đã được claim() ở trên nên
+    // không ai giành mất trong lúc ta thả khoá.
+    //
+    // Phải chốt trước khi trả về: sau đây tầng HTTP đọc ngay receivedBytes() và
+    // digestSoFar() làm mốc nối tiếp, mà đẩy song song thì hai giá trị đó chạy
+    // trước phần thật sự đã nằm trên Telegram.
+    chon->chotSoTruocKhiNoi();
+    return chon;
 }
 
 bool UploadManager::complete(const std::string& id, db::FileEntry& out, std::string& error) {
@@ -1105,9 +1183,19 @@ bool UploadManager::complete(const std::string& id, db::FileEntry& out, std::str
         db_.saveUpload(rec, recError);
     }
 
-    {
+    // CHỈ gỡ phiên khi đã xong hẳn. Gỡ lúc đang hỏng là thả nốt shared_ptr cuối
+    // cùng, ~UploadSession() chạy rollback(), và rollback() xoá SẠCH mọi mảnh đã
+    // đẩy lên — đúng cái bẫy đã ném đi 36 GB, chỉ khác là nấp ở đường hoàn tất
+    // thay vì đường nhận dữ liệu. Mảnh cuối gặp FLOOD_WAIT hay 500 là mất cả tệp.
+    //
+    // Giữ lại thì không mất gì: bộ quét phiên quá hạn vẫn dọn sau 30 phút nếu
+    // thật sự không ai gửi tiếp, mà trong 30 phút đó máy khách còn nối lại được.
+    if (ok) {
         std::lock_guard<std::mutex> lk(mu_);
         sessions_.erase(id);
+    } else {
+        LOG_WARN(kTag, "[%s] Chưa hoàn tất được (%s) — giữ phiên để nối lại", id.c_str(),
+                 error.c_str());
     }
     return ok;
 }

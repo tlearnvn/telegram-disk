@@ -762,6 +762,11 @@ void registerApiRoutes(HttpServer& server, app::App& app) {
         // đúng để trình duyệt cắt lại cho khớp.
         std::string offsetHeader = req.header("X-Upload-Offset");
         if (!offsetHeader.empty()) {
+            // Chốt sổ trước khi đọc mốc: đẩy song song thì receivedBytes() chạy
+            // trước tới vài mảnh so với phần thật sự đã nằm trên Telegram. Không
+            // chốt thì ta bảo trình duyệt "gửi tiếp từ byte N" trong khi mảnh
+            // chứa byte N-1 vừa hỏng ở luồng nền — tệp thủng lỗ, băm vẫn khớp.
+            session->chotSoTruocKhiNoi();
             uint64_t want = session->receivedBytes();
             uint64_t got = strtoull(offsetHeader.c_str(), nullptr, 10);
             if (got != want) {

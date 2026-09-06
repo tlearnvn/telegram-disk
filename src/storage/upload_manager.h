@@ -136,6 +136,13 @@ public:
     uint64_t receivedBytes() const { return receivedBytes_.load(); }
     int64_t lastActivity() const { return lastActivity_.load(); }
 
+    // RAM phiên này đang giữ cho vùng đệm — để ngân sách RAM là ngân sách CHUNG
+    // của cả máy chủ chứ không phải mỗi phiên một suất.
+    uint64_t ramDangGiu() const {
+        if (cheDoDem_ != BufferMode::Memory) return 0;
+        return static_cast<uint64_t>(soManhSongSong_) * chunkSize_;
+    }
+
     // SHA-256 của đúng receivedBytes() byte đã nhận. Dùng để nối lại qua WebDAV:
     // máy khách gửi lại từ đầu, ta băm phần trùng rồi đối chiếu, khớp mới nối.
     Bytes digestSoFar() const;
@@ -288,6 +295,8 @@ private:
 
     // Quyết định phiên này đẩy tuần tự hay song song, và đệm bằng gì.
     void chonCachDay(UploadSession& s);
+    // Dọn tệp tạm sót lại từ lần chạy trước (máy chủ bị kill giữa chừng).
+    void donTepTamBoLai();
 
     StorageEngine& engine_;
     db::Database& db_;

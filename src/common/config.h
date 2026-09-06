@@ -34,7 +34,11 @@ struct StorageConfig {
     // Kích thước gói dữ liệu trình duyệt gửi lên mỗi lần.
     uint64_t browserChunkSize = 8ull * 1024 * 1024;
     // Số mảnh tải song song (mỗi mảnh dùng một tài khoản khác nhau).
-    int parallelChunks = 2;
+    // 1 = đẩy tuần tự, KHÔNG cần vùng đệm. Đây phải là mặc định: đặt >1 làm chế
+    // độ stream tự chuyển sang đệm đĩa, nghĩa là một bản nâng cấp lặng lẽ bắt
+    // máy người ta ghi vài GB tệp tạm mà họ không hề yêu cầu. Ai muốn nhanh thì
+    // tự bật, và lúc đó họ biết mình đánh đổi cái gì.
+    int parallelChunks = 1;
     // Bộ nhớ đệm khối tải xuống.
     uint64_t downloadCacheBytes = 256ull * 1024 * 1024;
     // Tự động dọn phiên tải lên bỏ dở sau bao nhiêu giây không hoạt động.
