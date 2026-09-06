@@ -1897,15 +1897,21 @@ const MO_TA_CAI_DAT = {
     'Mỗi lần trình duyệt gửi lên máy chủ bao nhiêu byte. Nhỏ thì tiến độ mượt hơn và huỷ ' +
     'nhanh hơn; lớn thì đỡ tốn vòng lặp mạng.',
   'storage.parallel_chunks':
-    'Số mảnh được xử lý song song (mỗi mảnh giao cho một tài khoản Telegram khác nhau).',
-  'storage.memory_budget': 'Giới hạn RAM tối đa cho toàn bộ vùng đệm tải lên.',
+    'Số mảnh đẩy lên cùng lúc, mỗi mảnh một tài khoản Telegram khác nhau. Tăng lên thì ' +
+    'nhanh hơn và mỗi tài khoản bị giới hạn tần suất ít hơn, nhưng cần chỗ đệm: ' +
+    'số mảnh × cỡ mảnh. Để 1 là đẩy tuần tự như cũ. Chế độ đệm stream không đẩy song song ' +
+    'được nên khi đặt >1 máy chủ tự chuyển sang đệm ĐĨA.',
+  'storage.memory_budget':
+    'Giới hạn RAM cho vùng đệm tải lên. Chỉ có tác dụng khi Chế độ đệm là memory và ' +
+    'đang đẩy song song: số mảnh bay cùng lúc bị chặn ở mức ngân sách này chia cho cỡ mảnh.',
   'storage.download_cache_bytes':
     'Bộ nhớ đệm khối 1 MB khi tải xuống, giúp tua video mượt mà không tải lại.',
   'storage.deduplicate':
     'Nếu tệp mới trùng nội dung với tệp đã có, dùng lại dữ liệu cũ thay vì tốn thêm dung lượng.',
   'storage.trash_retention_days': 'Số ngày giữ tệp trong thùng rác trước khi tự xoá hẳn (0 = giữ mãi).',
   'storage.upload_idle_timeout_seconds':
-    'Phiên tải lên không có hoạt động quá số giây này sẽ tự huỷ và dọn dữ liệu.',
+    'Phiên tải lên không có hoạt động quá số giây này sẽ tự huỷ và dọn dữ liệu. Đây cũng ' +
+    'là cửa sổ để nối lại sau khi rớt mạng — tệp càng lớn thì càng nên để rộng.',
   'telegram.api_id': 'Lấy tại my.telegram.org → API development tools.',
   'telegram.api_hash': 'Đi kèm api_id ở trên.',
   'telegram.backend':

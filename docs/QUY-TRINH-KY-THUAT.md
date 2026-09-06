@@ -612,6 +612,62 @@ Mảnh to thì ít lời gọi API hơn, ít bản ghi hơn, nhìn danh sách g�
 nhỏ thì mỗi lần Telegram hắt hơi rẻ hơn nhiều. Với tệp hàng chục GB trên đường
 mạng không ổn định, cái thứ hai đáng giá hơn cái thứ nhất.
 
+### Đẩy nhiều mảnh song song
+
+Giới hạn tần suất của Telegram tính **theo từng tài khoản**. Nên mười tài khoản
+mà đẩy tuần tự thì vẫn chỉ một tài khoản gánh tại một thời điểm — nó ăn
+`FLOOD_PREMIUM_WAIT` trong khi chín tài khoản kia ngồi chơi. Chia cùng lượng byte
+đó cho bốn tài khoản thì mỗi tài khoản chỉ đẩy bằng ¼ tốc độ, và chạm ngưỡng ít
+đi bấy nhiêu lần.
+
+```mermaid
+flowchart LR
+    A["Dòng byte<br/>từ WebDAV"] --> B["Đệm mảnh N"]
+    B -->|"đầy → giao đi"| C1["Luồng nền · acc-1"]
+    B -->|"mảnh N+1"| C2["Luồng nền · acc-2"]
+    B -->|"mảnh N+2"| C3["Luồng nền · acc-3"]
+    B -->|"mảnh N+3"| C4["Luồng nền · acc-4"]
+    C1 --> D["Thu theo ĐÚNG thứ tự"]
+    C2 --> D
+    C3 --> D
+    C4 --> D
+    D --> E[("Ghi siêu dữ liệu")]
+```
+
+Hai ràng buộc làm nên toàn bộ thiết kế này:
+
+* **Muốn song song thì phải đệm.** Chế độ `stream` đẩy thẳng từng phần 512 KB ra
+  mạng ngay lúc nhận, nên chẳng có gì để giao cho luồng nền. Đặt số mảnh song
+  song > 1 trong lúc để `stream` thì máy chủ tự chuyển sang **đệm đĩa** — vẫn
+  giữ đúng tinh thần "ít RAM nhất", chỉ đổi chỗ chứa tạm. Đệm `memory` thì
+  `memoryBudget` chặn số mảnh bay cùng lúc ở mức *ngân sách ÷ cỡ mảnh*.
+* **Giao đi theo thứ tự, và THU VỀ cũng theo thứ tự.** Các mảnh vẫn bay cùng
+  lúc; ta chỉ đợi mảnh đầu hàng trước khi ghi nhận. Nhờ vậy phần đã thu luôn là
+  một **tiền tố liền mạch**, và mốc nối lại không bao giờ trỏ vào chỗ trống.
+
+> **Đã từng sai ở đây, và phép kiểm bắt được trước khi người dùng kịp gặp.**
+>
+> Bản đầu tiên của tui thu mảnh xong thì gặp mảnh hỏng là dừng, rồi *thu nốt*
+> phần còn lại — nhưng đoạn thu nốt ấy vẫn **ghi nhận** những mảnh phía sau như
+> thường. Mảnh #3 hỏng, mảnh #4 → #6 bay xong ngon lành, thế là mốc nối lại nhảy
+> từ 3 mảnh lên **7 mảnh**. Lượt gửi sau sẽ nối tiếp từ chỗ mà mảnh #3 chưa hề
+> nằm trên Telegram: tệp thủng một lỗ 32 KB ở giữa, băm vẫn khớp, không ai báo gì.
+>
+> Phép kiểm ghi đúng con số bắt được: `→ 229376 byte = 7 mảnh`, trong khi mảnh
+> hỏng là #3. Sửa bằng một lá cờ: **một khi đã có mảnh hỏng thì mọi mảnh thu về
+> sau đó đều mất tính liền mạch**, dù bản thân chúng đẩy xong — giữ lại để dọn,
+> không ghi vào danh sách mảnh, không dịch mốc.
+>
+> Và một cái rò rỉ đi kèm, cũng chỉ thấy khi đo: những mảnh "bay xong nhưng nằm
+> sau chỗ hỏng" sau đó bị đẩy lại ở lượt sau, nên bản cũ thành rác không tệp nào
+> trỏ tới. Đo trên đĩa: tệp cần 10 mảnh mà có **13**. Nay `complete()` dọn mảnh
+> mồ côi trước khi buông danh sách — đo lại: đúng 10.
+>
+> Bài học: **chạy song song thì "đã nhận bao nhiêu byte" không còn là "đã lưu an
+> toàn bao nhiêu byte" nữa.** Hai con số đó trùng nhau suốt thời gian code chạy
+> tuần tự, nên chỗ nào lỡ dùng lẫn cũng không ai phát hiện — cho tới ngày thêm
+> luồng.
+
 ### Nói cho đúng màu
 
 Cả hai họ lỗi trên đều là "đang xoay xở", không phải "hỏng". Nhưng người dùng

@@ -4,11 +4,13 @@
 
 #include <atomic>
 #include <condition_variable>
+#include <deque>
 #include <functional>
 #include <map>
 #include <memory>
 #include <mutex>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "common/config.h"
@@ -84,6 +86,36 @@ struct UploadProgress {
 
 class UploadManager;
 
+// Một mảnh đã nằm trọn trong vùng đệm và đang được một luồng nền đẩy lên
+// Telegram bằng tài khoản riêng của nó.
+//
+// Mảnh được GIAO ĐI theo thứ tự index, và cũng được THU VỀ theo đúng thứ tự đó.
+// Ràng buộc "thu về đúng thứ tự" là thứ giữ cho mọi chuyện đơn giản: phần đã
+// thu luôn là một tiền tố LIỀN MẠCH, nên mốc nối lại không bao giờ nhảy qua một
+// mảnh chưa thật sự nằm trên Telegram. Thu về theo thứ tự KHÔNG làm mất tính
+// song song — các mảnh vẫn bay cùng lúc, chỉ là ta đợi mảnh đầu hàng trước.
+struct ManhBay {
+    int index = 0;
+    uint64_t offset = 0;          // vị trí byte đầu mảnh trong tệp
+    uint64_t size = 0;
+    std::string sha256;           // băm của riêng mảnh này
+    crypto::Sha256 hasherSauManh; // ảnh chụp băm CẢ TỆP tính tới hết mảnh này
+    std::unique_ptr<ChunkBuffer> buffer;
+    std::thread luong;
+
+    // Kết quả — chỉ được đọc sau khi join().
+    bool ok = false;
+    std::string loi;
+    tg::ChunkLocation viTri;
+    std::string nhanTaiKhoan;
+
+    // Lưới an toàn: huỷ một std::thread còn join được là chương trình chết ngay
+    // (std::terminate). Mọi đường thoát đều phải đi qua đây.
+    ~ManhBay() {
+        if (luong.joinable()) luong.join();
+    }
+};
+
 // Một phiên tải lên.
 class UploadSession {
 public:
@@ -115,6 +147,11 @@ public:
     bool claim() { bool cho = false; return busy_.compare_exchange_strong(cho, true); }
     void release() { busy_.store(false); }
 
+    // Đợi mọi mảnh đang bay hạ cánh và lùi mốc nhận về tiền tố liền mạch nếu có
+    // mảnh hỏng. Phải gọi TRƯỚC khi đọc receivedBytes()/digestSoFar() để nối
+    // lại, không thì mốc nối tiếp trỏ vào chỗ dữ liệu chưa nằm trên Telegram.
+    void chotSoTruocKhiNoi();
+
 private:
     friend class UploadManager;
 
@@ -123,6 +160,16 @@ private:
     bool openChunk(std::string& error);
     bool closeChunk(std::string& error);
     void rollback();
+
+    // --- Đường đẩy song song (chỉ dùng khi soManhSongSong_ > 1) ---------------
+    // Giao mảnh đang đầy cho một luồng nền rồi mở mảnh kế tiếp ngay.
+    bool giaoManhChoNen(std::string& error);
+    // Thu mảnh ở đầu hàng: đợi luồng nền xong, ghi nhận kết quả, dịch mốc liền
+    // mạch. Giả định caller giữ mu_.
+    bool thuMotManh(std::string& error);
+    // Thu hết mảnh đang bay. Dùng trước khi nối lại, khi hoàn tất, và khi huỷ.
+    // Nếu có mảnh hỏng thì lùi mốc nhận về đúng tiền tố liền mạch đã đẩy xong.
+    bool thuHetManh(std::string& error);
 
     UploadManager& manager_;
     std::string id_;
@@ -148,6 +195,22 @@ private:
     std::unique_ptr<ChunkBuffer> buffer_;
     std::vector<tg::ChunkLocation> uploaded_;
     std::vector<db::ChunkEntry> chunkRecords_;
+
+    // Số mảnh được phép bay cùng lúc. 1 = đúng đường cũ, tuần tự, không sinh
+    // luồng nào. Chỉ >1 khi vùng đệm giữ được trọn mảnh (memory hoặc disk).
+    int soManhSongSong_ = 1;
+    BufferMode cheDoDem_ = BufferMode::Stream;
+    std::deque<std::unique_ptr<ManhBay>> dangBay_;
+
+    // Mốc LIỀN MẠCH đã thật sự nằm trên Telegram — khác với receivedBytes_, thứ
+    // chạy trước tới N mảnh. Khi có mảnh hỏng, receivedBytes_ và hasher_ được
+    // lùi về đúng hai giá trị này.
+    uint64_t committedBytes_ = 0;
+    crypto::Sha256 hasherCommitted_;
+    // Đã có mảnh hỏng trong lô đang bay. Từ lúc này mọi mảnh thu về sau đó đều
+    // không còn liền mạch, dù bản thân chúng đẩy xong.
+    bool manhHong_ = false;
+    std::string loiManhDau_;
 
     crypto::Sha256 hasher_;
     crypto::Sha256 chunkHasher_;
@@ -222,6 +285,9 @@ private:
     // Bảo đảm thư mục tồn tại, trả về id.
     bool ensureFolder(const std::string& path, int ownerId, int64_t& folderId,
                       std::string& error);
+
+    // Quyết định phiên này đẩy tuần tự hay song song, và đệm bằng gì.
+    void chonCachDay(UploadSession& s);
 
     StorageEngine& engine_;
     db::Database& db_;

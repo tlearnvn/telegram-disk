@@ -304,7 +304,7 @@ Những mục hay dùng nhất:
 | **Kích thước mảnh** | 500 MB | Mỗi mảnh gửi lên Telegram lớn bao nhiêu. Tối đa ~1900 MB |
 | **Chế độ đệm** | `stream` | `stream` tốn rất ít RAM · `memory` giữ trọn mảnh trong RAM · `disk` ghi ra tệp tạm |
 | **Cỡ khối trình duyệt gửi** | 8 MB | Mỗi lần trình duyệt gửi lên máy chủ bao nhiêu byte |
-| **Số mảnh song song** | 2 | Bao nhiêu mảnh xử lý cùng lúc (mỗi mảnh một tài khoản) |
+| **Số mảnh song song** | 2 | Bao nhiêu mảnh đẩy cùng lúc, mỗi mảnh một tài khoản. Xem ngay bên dưới |
 | **Khử trùng lặp** | Bật | Tệp trùng nội dung dùng lại dữ liệu cũ |
 | **Bộ đệm tải xuống** | 256 MB | Đệm khối 1 MB giúp tua video mượt. **Đây cũng chính là mức RAM ứng dụng dùng khi có người tải tệp** — máy ít RAM thì hạ xuống 32–64 MB |
 | **Số ngày giữ thùng rác** | 30 | |
@@ -313,6 +313,40 @@ Những mục hay dùng nhất:
 
 Đổi cỡ mảnh chỉ ảnh hưởng tệp tải lên **sau đó**. Tệp cũ giữ nguyên cách cắt cũ
 và vẫn đọc bình thường.
+
+### Số mảnh song song
+
+Đây là nút đáng chỉnh nhất nếu bạn hay gặp `FLOOD_PREMIUM_WAIT`, vì giới hạn tần
+suất của Telegram tính **theo từng tài khoản**. Để 1 thì dù có mười tài khoản,
+mỗi lúc cũng chỉ một tài khoản gánh — nó ăn giới hạn còn chín tài khoản kia ngồi
+chơi. Để 4 thì cùng lượng byte ấy chia cho bốn tài khoản, mỗi tài khoản đẩy bằng
+¼ tốc độ và chạm ngưỡng ít đi bấy nhiêu lần.
+
+**Cái giá là chỗ đệm.** Đẩy song song cần giữ trọn mảnh ở đâu đó trước khi giao
+cho luồng nền, nên tốn *số mảnh × cỡ mảnh*:
+
+| Số mảnh song song | Cỡ mảnh 512 MB | Cỡ mảnh 1,66 GB |
+|---|---|---|
+| 1 (tuần tự) | 0 | 0 |
+| 2 | 1 GB | 3,3 GB |
+| 4 | 2 GB | 6,6 GB |
+
+Chỗ đệm đó nằm ở đâu là do **Chế độ đệm** quyết định:
+
+- `stream` — không đệm được, nên khi đặt song song > 1 máy chủ **tự chuyển sang
+  đệm đĩa** và ghi rõ trong nhật ký. RAM vẫn thấp, chỉ tốn chỗ trống trong
+  **Thư mục tệp tạm**.
+- `memory` — đệm bằng RAM, và **Giới hạn RAM cho vùng đệm** sẽ chặn: số mảnh bay
+  cùng lúc không vượt quá *giới hạn ÷ cỡ mảnh*. Đặt 4 mà RAM chỉ đủ 2 thì máy
+  chủ hạ xuống 2 và ghi cảnh báo.
+- `disk` — đệm ra tệp tạm, giống trường hợp `stream` tự chuyển.
+
+**Gợi ý:** nhiều tài khoản + tệp lớn thì để **4**, cỡ mảnh **512 MB**, chế độ đệm
+`stream` (máy chủ tự lo phần đĩa). Ổ đĩa cần trống ít nhất 2 GB cho vùng tạm.
+
+> Bản trước bản này có nút đó trên giao diện nhưng **không dòng mã nào đọc tới** —
+> chỉnh 2 hay 16 đều đẩy tuần tự y hệt. Nút "Giới hạn RAM cho vùng đệm" cũng vậy.
+> Cả hai nay đã chạy thật.
 
 ---
 
@@ -468,8 +502,11 @@ Từ bản này ứng dụng tự chờ rồi làm lại, và **phần đã tả
 nối tiếp. Tải bằng WebDAV cũng vậy: máy chủ trả 503 kèm `Retry-After`, rclone hay
 davfs2 sẽ chờ đúng số giây đó rồi gửi lại, và máy chủ nối tiếp từ chỗ đã dừng.
 
-Muốn đỡ gặp thì: thêm nhiều tài khoản Telegram để chia tải, hoặc giảm
-**Số mảnh tải song song** trong Cài đặt cho nhẹ tay hơn.
+Muốn đỡ gặp thì **tăng Số mảnh song song** trong Cài đặt. Nghe ngược đời, nhưng
+giới hạn tần suất tính **theo từng tài khoản**: mười tài khoản mà đẩy tuần tự thì
+vẫn chỉ một tài khoản gánh, còn chín tài khoản kia ngồi chơi. Chia cùng lượng
+byte đó cho bốn tài khoản thì mỗi tài khoản chỉ đẩy bằng ¼ tốc độ, và chạm ngưỡng
+ít đi bấy nhiêu lần. Xem mục [Số mảnh song song](#số-mảnh-song-song) bên dưới.
 
 > Bản trước bản này báo `507 Insufficient Storage` rồi huỷ cả lượt tải — đó là
 > lỗi của ứng dụng, không phải máy chủ hết chỗ. Đã sửa.

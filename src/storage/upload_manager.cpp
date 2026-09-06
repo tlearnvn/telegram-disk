@@ -92,6 +92,54 @@ bool laLoiTamThoi(const std::string& error, int& giayOut) {
     return false;
 }
 
+// Đẩy song song bắt buộc phải ĐỆM trọn mảnh: luồng nền chỉ nhận được một mảnh
+// khi mảnh đó đã nằm đủ ở đâu đó. Chế độ stream đẩy thẳng từng phần 512 KB ra
+// mạng ngay lúc nhận nên chẳng có gì để giao — nó luôn tuần tự.
+//
+// Đây cũng là chỗ memoryBudget có nghĩa: đệm bằng RAM thì số mảnh bay cùng lúc
+// bị chặn bởi ngân sách RAM chia cho cỡ mảnh.
+void UploadManager::chonCachDay(UploadSession& s) {
+    int muon = config_.storage.parallelChunks;
+    if (muon < 1) muon = 1;
+    BufferMode mode = parseBufferMode(config_.storage.bufferMode);
+
+    if (muon == 1) {
+        s.soManhSongSong_ = 1;
+        s.cheDoDem_ = mode;
+        return;
+    }
+
+    if (mode == BufferMode::Stream) {
+        // Người dùng muốn song song mà lại để stream. Đệm ra ĐĨA là lựa chọn
+        // đúng tinh thần "ít RAM nhất" của họ, chỉ đổi chỗ chứa tạm.
+        mode = BufferMode::Disk;
+        LOG_INFO(kTag,
+                 "[%s] Đẩy %d mảnh song song nên cần đệm — dùng đệm ĐĨA tại %s"
+                 " (chế độ stream không tách mảnh ra đẩy song song được)",
+                 s.id_.c_str(), muon, config_.storage.spoolDirectory.c_str());
+    } else if (mode == BufferMode::Memory) {
+        uint64_t nganSach = config_.storage.memoryBudget;
+        uint64_t vuaDuoc = s.chunkSize_ > 0 ? nganSach / s.chunkSize_ : 0;
+        if (vuaDuoc < 1) vuaDuoc = 1;
+        if (static_cast<uint64_t>(muon) > vuaDuoc) {
+            LOG_WARN(kTag,
+                     "[%s] Đệm RAM %s chỉ chứa nổi %llu mảnh cỡ %s — hạ từ %d xuống %llu mảnh"
+                     " song song (đổi sang đệm đĩa nếu muốn nhiều hơn)",
+                     s.id_.c_str(), formatBytes(nganSach).c_str(),
+                     static_cast<unsigned long long>(vuaDuoc), formatBytes(s.chunkSize_).c_str(),
+                     muon, static_cast<unsigned long long>(vuaDuoc));
+            muon = static_cast<int>(vuaDuoc);
+        }
+    }
+
+    s.cheDoDem_ = mode;
+    s.soManhSongSong_ = muon;
+    if (muon > 1) {
+        LOG_INFO(kTag, "[%s] Đẩy tối đa %d mảnh song song, mỗi mảnh một tài khoản, đệm %s",
+                 s.id_.c_str(), muon, bufferModeName(mode));
+    }
+}
+
 // ---------------------------------------------------------------------------
 //  UploadSession
 // ---------------------------------------------------------------------------
@@ -164,18 +212,31 @@ bool UploadSession::openChunk(std::string& error) {
     std::snprintf(nameBuf, sizeof(nameBuf), "%s.p%04d", id_.c_str(), chunkIndex_);
     std::string chunkName = nameBuf;
 
+    std::string spool = manager_.config().resolvePath(
+        joinPath(manager_.config().storage.spoolDirectory, chunkName + ".tmp"));
+
+    if (soManhSongSong_ > 1) {
+        // Đường song song: chỉ mở VÙNG ĐỆM, chưa đụng gì tới Telegram. Tài khoản
+        // được chọn muộn — lúc luồng nền thật sự đẩy — nên nó chọn được tài
+        // khoản rảnh nhất tại đúng thời điểm đó chứ không phải lúc mở mảnh.
+        buffer_.reset(new ChunkBuffer(cheDoDem_, thisChunkSize, spool));
+        writer_.reset();
+        currentAccount_ = "đang đợi tài khoản";
+        chunkWritten_ = 0;
+        chunkHasher_.reset();
+        LOG_DEBUG(kTag, "[%s] Mở mảnh %d/%d (%s) vào vùng đệm %s", id_.c_str(), chunkIndex_ + 1,
+                  chunkTotal_, formatBytes(thisChunkSize).c_str(), bufferModeName(cheDoDem_));
+        return true;
+    }
+
     writer_ = manager_.engine().backend().beginChunk(thisChunkSize, chunkName, error);
     if (!writer_) return false;
     currentAccount_ = writer_->sourceLabel();
 
-    BufferMode mode = parseBufferMode(manager_.config().storage.bufferMode);
-    std::string spool = manager_.config().resolvePath(
-        joinPath(manager_.config().storage.spoolDirectory, chunkName + ".tmp"));
-
     tg::ChunkWriter* w = writer_.get();
     UploadSession* self = this;
     buffer_.reset(new ChunkBuffer(
-        mode, thisChunkSize, spool,
+        cheDoDem_, thisChunkSize, spool,
         [w, self](const uint8_t* data, size_t len, std::string& err) -> bool {
             if (self->cancelled_.load()) {
                 err = "Phiên tải lên đã bị huỷ";
@@ -191,6 +252,157 @@ bool UploadSession::openChunk(std::string& error) {
     LOG_DEBUG(kTag, "[%s] Mở mảnh %d/%d (%s) qua %s", id_.c_str(), chunkIndex_ + 1, chunkTotal_,
               formatBytes(thisChunkSize).c_str(), currentAccount_.c_str());
     return true;
+}
+
+// Giao mảnh vừa đầy cho một luồng nền, rồi mở mảnh kế tiếp ngay lập tức.
+// Giả định caller giữ mu_.
+bool UploadSession::giaoManhChoNen(std::string& error) {
+    if (!buffer_) return true;
+
+    auto manh = std::unique_ptr<ManhBay>(new ManhBay());
+    manh->index = chunkIndex_;
+    manh->offset = chunkOffset_;
+    manh->size = chunkWritten_;
+    manh->buffer = std::move(buffer_);
+
+    uint8_t digest[32];
+    chunkHasher_.finish(digest);
+    manh->sha256 = toHex(digest, 32);
+    // Ảnh chụp băm CẢ TỆP tại đúng ranh giới cuối mảnh này. Sha256 là kiểu dữ
+    // liệu thuần (mảng số, không con trỏ) nên sao chép được nguyên trạng — đây
+    // chính là thứ cho phép lùi mốc nối lại về đúng ranh giới mảnh khi có mảnh
+    // hỏng, mà không phải băm lại từ đầu tệp.
+    manh->hasherSauManh = hasher_;
+
+    char nameBuf[64];
+    std::snprintf(nameBuf, sizeof(nameBuf), "%s.p%04d", id_.c_str(), manh->index);
+    std::string chunkName = nameBuf;
+
+    ManhBay* raw = manh.get();
+    UploadSession* self = this;
+    uint64_t coManh = manh->size;
+    raw->luong = std::thread([self, raw, chunkName, coManh]() {
+        if (self->cancelled_.load()) {
+            raw->loi = "Phiên tải lên đã bị huỷ";
+            return;
+        }
+        std::string err;
+        std::unique_ptr<tg::ChunkWriter> w =
+            self->manager_.engine().backend().beginChunk(coManh, chunkName, err);
+        if (!w) {
+            raw->loi = err.empty() ? "Không mở được mảnh trên Telegram" : err;
+            return;
+        }
+        raw->nhanTaiKhoan = w->sourceLabel();
+        bool oke = raw->buffer->flush(
+            [self, &w](const uint8_t* data, size_t len, std::string& e) -> bool {
+                if (self->cancelled_.load()) {
+                    e = "Phiên tải lên đã bị huỷ";
+                    return false;
+                }
+                if (!w->write(data, len, e)) return false;
+                self->storedBytes_.fetch_add(len);
+                return true;
+            },
+            err);
+        raw->buffer->discard();
+        if (!oke) {
+            w->abort();
+            raw->loi = err;
+            return;
+        }
+        if (!w->finish(raw->viTri, err)) {
+            raw->loi = err;
+            return;
+        }
+        raw->ok = true;
+    });
+
+    dangBay_.push_back(std::move(manh));
+
+    chunkOffset_ += chunkWritten_;
+    chunkWritten_ = 0;
+    ++chunkIndex_;
+    (void)error;
+    return true;
+}
+
+// Thu mảnh ở ĐẦU hàng — đợi nó xong, ghi nhận, rồi dịch mốc liền mạch.
+// Giả định caller giữ mu_.
+bool UploadSession::thuMotManh(std::string& error) {
+    if (dangBay_.empty()) return true;
+    std::unique_ptr<ManhBay> manh = std::move(dangBay_.front());
+    dangBay_.pop_front();
+    if (manh->luong.joinable()) manh->luong.join();
+
+    // Một khi đã có mảnh hỏng thì MỌI mảnh sau nó đều mất tính liền mạch — kể
+    // cả những mảnh tự nó đẩy xong ngon lành, vì giữa chúng và phần đã chốt có
+    // một lỗ hổng. Giữ lại vị trí để bộ dọn thu hồi, nhưng tuyệt đối không ghi
+    // vào danh sách mảnh và không dịch mốc liền mạch.
+    if (manhHong_) {
+        if (manh->ok) uploaded_.push_back(manh->viTri);
+        error = loiManhDau_.empty() ? "Có mảnh đẩy lên thất bại" : loiManhDau_;
+        return false;
+    }
+
+    if (!manh->ok) {
+        manhHong_ = true;
+        loiManhDau_ = manh->loi.empty() ? "Đẩy mảnh lên Telegram thất bại" : manh->loi;
+        error = loiManhDau_;
+        return false;
+    }
+
+    db::ChunkEntry rec;
+    rec.index = manh->index;
+    rec.offset = manh->offset;
+    rec.size = manh->size;
+    rec.sha256 = manh->sha256;
+    StorageEngine::fromLocation(manh->viTri, rec);
+    rec.size = manh->size;
+    chunkRecords_.push_back(rec);
+    uploaded_.push_back(manh->viTri);
+
+    // Thu theo đúng thứ tự nên tới đây, mọi mảnh trước nó đều đã xong: mốc này
+    // là một tiền tố LIỀN MẠCH thật sự nằm trên Telegram.
+    committedBytes_ = manh->offset + manh->size;
+    hasherCommitted_ = manh->hasherSauManh;
+
+    LOG_INFO(kTag, "[%s] Đã lưu mảnh %d/%d — %s qua %s", id_.c_str(), manh->index + 1, chunkTotal_,
+             formatBytes(manh->size).c_str(), manh->nhanTaiKhoan.c_str());
+    currentAccount_ = manh->nhanTaiKhoan;
+    return true;
+}
+
+// Thu HẾT mảnh đang bay. Nếu có mảnh hỏng thì lùi mốc nhận về đúng tiền tố liền
+// mạch — nếu không, lượt gửi sau sẽ nối tiếp từ một chỗ mà dữ liệu chưa hề nằm
+// trên Telegram, và tệp hỏng âm thầm.
+bool UploadSession::thuHetManh(std::string& error) {
+    // Thu cho bằng hết — luồng nền nào cũng phải được join, không thì std::thread
+    // bị huỷ trong lúc còn chạy và chương trình chết ngay (std::terminate).
+    // thuMotManh() tự nhớ mảnh hỏng đầu tiên nên vòng lặp này cứ chạy tới cạn.
+    while (!dangBay_.empty()) {
+        std::string bo;
+        thuMotManh(bo);
+    }
+    if (!manhHong_) return true;
+
+    // Lùi cả số byte đã nhận lẫn băm về đúng ranh giới mảnh cuối đã đẩy xong.
+    // Không lùi thì lượt gửi sau nối tiếp từ chỗ chưa có dữ liệu trên Telegram.
+    receivedBytes_.store(committedBytes_);
+    hasher_ = hasherCommitted_;
+    chunkOffset_ = committedBytes_;
+    chunkIndex_ = chunkRecords_.empty() ? 0 : chunkRecords_.back().index + 1;
+    chunkWritten_ = 0;
+    chunkHasher_.reset();
+    if (buffer_) {
+        buffer_->discard();
+        buffer_.reset();
+    }
+    error = loiManhDau_;
+    // Xoá cờ để lượt gửi sau bắt đầu lại sạch sẽ từ mốc vừa lùi về.
+    manhHong_ = false;
+    loiManhDau_.clear();
+    return false;
 }
 
 bool UploadSession::closeChunk(std::string& error) {
@@ -230,6 +442,11 @@ bool UploadSession::closeChunk(std::string& error) {
     chunkOffset_ += chunkWritten_;
     chunkWritten_ = 0;
     ++chunkIndex_;
+    // Đường tuần tự: mảnh vừa đóng là đã nằm trên Telegram, nên mốc liền mạch
+    // tiến ngay tới đây. Giữ hai mốc này đúng ở CẢ HAI đường để phần lùi mốc khi
+    // hỏng không phải phân biệt mình đang chạy kiểu nào.
+    committedBytes_ = chunkOffset_;
+    hasherCommitted_ = hasher_;
     return true;
 }
 
@@ -260,30 +477,57 @@ bool UploadSession::receive(const uint8_t* data, size_t len, std::string& error)
     state_ = UploadState::Receiving;
     lastActivity_.store(nowUnix());
 
+    // Đóng mảnh: tuần tự thì đẩy tại chỗ, song song thì giao cho luồng nền.
+    auto dongManh = [this, &error]() -> bool {
+        if (soManhSongSong_ <= 1) return closeChunk(error);
+        if (!giaoManhChoNen(error)) return false;
+        // Chặn dòng vào khi đã đủ số mảnh bay cùng lúc: thu bớt mảnh đầu hàng
+        // rồi mới nhận tiếp. Không có bước này thì cả tệp 58 GB sẽ chui hết vào
+        // RAM hoặc ổ đĩa.
+        while (static_cast<int>(dangBay_.size()) >= soManhSongSong_) {
+            if (!thuMotManh(error)) return false;
+        }
+        return true;
+    };
+    // Hỏng giữa chừng thì phải thu hết mảnh đang bay TRƯỚC khi báo lỗi ra ngoài:
+    // luồng nền phải được join, và mốc nhận phải lùi về tiền tố liền mạch để
+    // lượt gửi sau nối đúng chỗ.
+    auto bao = [this, &error](const std::string& e) {
+        error = e;
+        if (soManhSongSong_ > 1 && !dangBay_.empty()) {
+            std::string bo;
+            thuHetManh(bo);
+        }
+        ghiNhanLoi(error);
+    };
+
     size_t offset = 0;
     while (offset < len) {
         if (cancelled_.load()) {
             error = "Phiên tải lên đã bị huỷ";
             return false;
         }
-        if (!writer_) {
+        // Ở đường song song writer_ luôn rỗng (tài khoản chọn muộn, trong luồng
+        // nền), nên mốc "đã mở mảnh chưa" phải là VÙNG ĐỆM chứ không phải writer.
+        if (!buffer_) {
             if (!openChunk(error)) {
-                ghiNhanLoi(error);
+                bao(error);
                 return false;
             }
         }
+
         uint64_t remainingInChunk = chunkSize_ - chunkWritten_;
         size_t take = static_cast<size_t>(
             std::min<uint64_t>(remainingInChunk, static_cast<uint64_t>(len - offset)));
         if (take == 0) {
-            if (!closeChunk(error)) {
-                ghiNhanLoi(error);
+            if (!dongManh()) {
+                bao(error);
                 return false;
             }
             continue;
         }
         if (!buffer_->append(data + offset, take, error)) {
-            ghiNhanLoi(error);
+            bao(error);
             return false;
         }
         hasher_.update(data + offset, take);
@@ -293,8 +537,8 @@ bool UploadSession::receive(const uint8_t* data, size_t len, std::string& error)
         receivedBytes_.fetch_add(take);
 
         if (chunkWritten_ >= chunkSize_) {
-            if (!closeChunk(error)) {
-                ghiNhanLoi(error);
+            if (!dongManh()) {
+                bao(error);
                 return false;
             }
         }
@@ -311,7 +555,33 @@ bool UploadSession::complete(db::FileEntry& out, std::string& error) {
     }
     state_ = UploadState::Flushing;
 
-    if (writer_ && chunkWritten_ > 0) {
+    if (soManhSongSong_ > 1) {
+        // Mảnh cuối (thường chưa đầy) cũng phải được giao đi, rồi đợi cho tất cả
+        // mảnh đang bay hạ cánh mới được ghi siêu dữ liệu.
+        if (buffer_ && chunkWritten_ > 0) {
+            if (!giaoManhChoNen(error)) {
+                std::string bo;
+                thuHetManh(bo);
+                state_ = UploadState::Failed;
+                message_ = error;
+                return false;
+            }
+        } else if (buffer_) {
+            buffer_->discard();
+            buffer_.reset();
+        }
+        if (!thuHetManh(error)) {
+            state_ = UploadState::Failed;
+            message_ = error;
+            return false;
+        }
+        // Thu theo thứ tự nên chunkRecords_ đã đúng thứ tự sẵn, nhưng sắp lại
+        // cho chắc: siêu dữ liệu sai thứ tự là tệp hỏng mà không ai báo.
+        std::sort(chunkRecords_.begin(), chunkRecords_.end(),
+                  [](const db::ChunkEntry& a, const db::ChunkEntry& b) {
+                      return a.index < b.index;
+                  });
+    } else if (writer_ && chunkWritten_ > 0) {
         if (!closeChunk(error)) {
             state_ = UploadState::Failed;
             message_ = error;
@@ -422,6 +692,30 @@ bool UploadSession::complete(db::FileEntry& out, std::string& error) {
         }
     }
 
+    // Dọn mảnh MỒ CÔI trước khi buông danh sách. Chạy song song mà có mảnh
+    // hỏng thì những mảnh bay SAU nó vẫn hạ cánh bình thường, nhưng chúng nằm
+    // ngoài tiền tố liền mạch nên lượt gửi sau đã đẩy lại từ đầu chỗ đó — bản
+    // cũ thành rác không tệp nào trỏ tới. Không dọn ở đây thì mỗi lần Telegram
+    // hắt hơi là rò rỉ tới (số mảnh song song − 1) mảnh, vĩnh viễn.
+    {
+        std::vector<tg::ChunkLocation> moCoi;
+        for (const auto& loc : uploaded_) {
+            bool duocDung = false;
+            for (const auto& rec : chunkRecords_) {
+                if (rec.documentId == loc.documentId) { duocDung = true; break; }
+            }
+            if (!duocDung) moCoi.push_back(loc);
+        }
+        if (!moCoi.empty()) {
+            LOG_INFO(kTag, "[%s] Dọn %zu mảnh mồ côi (đẩy xong nhưng nằm sau chỗ hỏng)",
+                     id_.c_str(), moCoi.size());
+            std::string loiDon;
+            manager_.engine().backend().removeChunks(moCoi, loiDon);
+            if (!loiDon.empty())
+                LOG_WARN(kTag, "[%s] Dọn mảnh mồ côi chưa trọn: %s", id_.c_str(), loiDon.c_str());
+        }
+    }
+
     uploaded_.clear();  // đã thuộc về tệp, không rollback nữa
     state_ = UploadState::Completed;
     message_ = "Hoàn tất";
@@ -442,11 +736,31 @@ void UploadSession::rollback() {
     chunkRecords_.clear();
 }
 
+void UploadSession::chotSoTruocKhiNoi() {
+    std::lock_guard<std::mutex> lk(mu_);
+    if (dangBay_.empty()) return;
+    std::string error;
+    if (!thuHetManh(error)) {
+        LOG_WARN(kTag, "[%s] Có mảnh hỏng khi chốt sổ (%s) — lùi mốc nối lại về %s",
+                 id_.c_str(), error.c_str(), formatBytes(committedBytes_).c_str());
+        message_ = error;
+    }
+}
+
 void UploadSession::cancel(const std::string& reason) {
     if (cancelled_.exchange(true)) return;
     std::lock_guard<std::mutex> lk(mu_);
     state_ = UploadState::Cancelled;
     message_ = reason.empty() ? "Đã huỷ theo yêu cầu" : reason;
+    // Phải ĐỢI luồng nền dừng hẳn trước khi dọn: cờ cancelled_ ở trên làm chúng
+    // bỏ cuộc sớm, nhưng mảnh nào đã gọi finish() rồi thì vẫn kịp nằm lại trên
+    // Telegram. Dọn trước rồi mới đợi là để sót đúng những mảnh đó.
+    while (!dangBay_.empty()) {
+        std::unique_ptr<ManhBay> manh = std::move(dangBay_.front());
+        dangBay_.pop_front();
+        if (manh->luong.joinable()) manh->luong.join();
+        if (manh->ok) uploaded_.push_back(manh->viTri);
+    }
     if (writer_) {
         writer_->abort();
         writer_.reset();
@@ -707,6 +1021,7 @@ UploadInitResult UploadManager::begin(const UploadInitRequest& req) {
                 ? 1
                 : static_cast<int>((req.totalSize + session->chunkSize_ - 1) /
                                    session->chunkSize_);
+        chonCachDay(*session);
         session->state_ = UploadState::Preparing;
     }
 
@@ -730,10 +1045,13 @@ UploadInitResult UploadManager::begin(const UploadInitRequest& req) {
     result.ok = true;
     result.uploadId = id;
     result.message = "Sẵn sàng nhận dữ liệu.";
-    LOG_INFO(kTag, "[%s] Bắt đầu tải '%s' (%s) vào %s — mảnh %s, chế độ đệm %s", id.c_str(),
-             cleanName.c_str(), formatBytes(req.totalSize).c_str(),
+    // Ghi chế độ đệm THẬT SỰ dùng, không phải chế độ ghi trong cấu hình: chạy
+    // song song có thể đã đổi stream thành đĩa. Nhật ký nói sai thì lần sau đọc
+    // lại chính mình cũng chẩn đoán nhầm.
+    LOG_INFO(kTag, "[%s] Bắt đầu tải '%s' (%s) vào %s — mảnh %s, đệm %s, %d mảnh song song",
+             id.c_str(), cleanName.c_str(), formatBytes(req.totalSize).c_str(),
              rec.targetPath.c_str(), formatBytes(config_.storage.chunkSize).c_str(),
-             config_.storage.bufferMode.c_str());
+             bufferModeName(session->cheDoDem_), session->soManhSongSong_);
     return result;
 }
 
@@ -760,6 +1078,11 @@ std::shared_ptr<UploadSession> UploadManager::claimResumable(int ownerId,
         if (s->totalSize() != totalSize) continue;
         if (s->targetKey() != key) continue;
         if (!s->claim()) continue;   // một lượt PUT khác đang dùng
+        // Chốt sổ trước khi giao phiên đi: đợi mọi mảnh đang bay hạ cánh, và
+        // nếu có mảnh hỏng thì lùi mốc nhận về tiền tố liền mạch. Có bước này
+        // thì receivedBytes()/digestSoFar() mà tầng HTTP đọc ngay sau đây mới là
+        // sự thật — không thì nó nối tiếp từ một chỗ chưa hề nằm trên Telegram.
+        s->chotSoTruocKhiNoi();
         return s;
     }
     return nullptr;

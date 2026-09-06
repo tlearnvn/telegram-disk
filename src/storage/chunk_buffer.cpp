@@ -59,6 +59,10 @@ bool ChunkBuffer::append(const uint8_t* data, size_t len, std::string& error) {
 
     switch (mode_) {
         case BufferMode::Stream:
+            if (!sink_) {
+                error = "Chế độ stream cần nơi nhận dữ liệu ngay từ đầu";
+                return false;
+            }
             return sink_(data, len, error);
 
         case BufferMode::Memory:
@@ -82,14 +86,14 @@ bool ChunkBuffer::append(const uint8_t* data, size_t len, std::string& error) {
     return false;
 }
 
-bool ChunkBuffer::flushMemory(std::string& error) {
+bool ChunkBuffer::flushMemory(const SinkFn& sink, std::string& error) {
     if (memory_.empty()) return true;
     // Đẩy theo từng khối để không giữ hai bản sao lớn cùng lúc.
     size_t offset = 0;
     const size_t step = 1024 * 1024;
     while (offset < memory_.size()) {
         size_t take = std::min(step, memory_.size() - offset);
-        if (!sink_(memory_.data() + offset, take, error)) return false;
+        if (!sink(memory_.data() + offset, take, error)) return false;
         offset += take;
     }
     memory_.clear();
@@ -98,7 +102,7 @@ bool ChunkBuffer::flushMemory(std::string& error) {
     return true;
 }
 
-bool ChunkBuffer::flushDisk(std::string& error) {
+bool ChunkBuffer::flushDisk(const SinkFn& sink, std::string& error) {
     if (!file_) return true;
     if (std::fflush(file_) != 0) {
         error = "Không ghi xong tệp tạm";
@@ -112,21 +116,31 @@ bool ChunkBuffer::flushDisk(std::string& error) {
     while (true) {
         size_t got = std::fread(block.data(), 1, block.size(), file_);
         if (got == 0) break;
-        if (!sink_(block.data(), got, error)) return false;
+        if (!sink(block.data(), got, error)) return false;
     }
     buffered_ = 0;
     return true;
 }
 
-bool ChunkBuffer::flush(std::string& error) {
+bool ChunkBuffer::flush(std::string& error) { return flush(sink_, error); }
+
+bool ChunkBuffer::flush(const SinkFn& sink, std::string& error) {
     if (discarded_) {
         error = "Vùng đệm đã bị huỷ";
         return false;
     }
     switch (mode_) {
-        case BufferMode::Stream: return true;
-        case BufferMode::Memory: return flushMemory(error);
-        case BufferMode::Disk: return flushDisk(error);
+        case BufferMode::Stream:
+            // Không giữ gì cả — dữ liệu đã đi thẳng ra ngoài từ lúc append().
+            return true;
+        case BufferMode::Memory:
+        case BufferMode::Disk:
+            if (!sink) {
+                error = "Vùng đệm chưa có nơi nhận dữ liệu";
+                return false;
+            }
+            return mode_ == BufferMode::Memory ? flushMemory(sink, error)
+                                               : flushDisk(sink, error);
     }
     return true;
 }

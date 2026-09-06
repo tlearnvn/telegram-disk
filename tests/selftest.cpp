@@ -1,9 +1,14 @@
 // Bộ tự kiểm tra của Tuấn's Telegram Disk.
 // Chạy: ./ttd_selftest  (được build-linux.sh gọi tự động trước khi đóng gói)
 
+#include <atomic>
+#include <chrono>
 #include <cstdio>
 #include <cstring>
+#include <map>
+#include <mutex>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "common/config.h"
@@ -919,6 +924,307 @@ void testDoiTaiKhoanKhiDoc() {
 }
 
 // ---------------------------------------------------------------------------
+// Đẩy nhiều mảnh song song.
+//
+// Nơi lưu giả này cố tình NGỦ một nhịp trong finish(), vì nếu đẩy tức thì thì
+// chạy tuần tự hay song song đều xong như nhau và phép kiểm chẳng chứng minh
+// được gì. Nó cũng đếm số mảnh chồng nhau tại một thời điểm — đó là bằng chứng
+// duy nhất cho thấy song song có thật.
+class BackendDemSongSong : public tg::StorageBackend {
+public:
+    std::mutex mu;
+    std::map<int64_t, Bytes> noiDung;          // documentId → dữ liệu đã nhận
+    std::atomic<int> dangDay{0};
+    std::atomic<int> dinhCaoDongThoi{0};
+    std::atomic<int> soManh{0};
+    std::atomic<int> soManhBiXoa{0};
+    int manhHong = -1;                          // chỉ số mảnh cố tình cho hỏng
+    int nghiMs = 25;
+
+    class Writer : public tg::ChunkWriter {
+    public:
+        Writer(BackendDemSongSong& b, int stt) : b_(b), stt_(stt) {
+            int hienGio = ++b_.dangDay;
+            int cu = b_.dinhCaoDongThoi.load();
+            while (hienGio > cu && !b_.dinhCaoDongThoi.compare_exchange_weak(cu, hienGio)) {}
+        }
+        ~Writer() override { if (!xong_) --b_.dangDay; }
+        bool write(const uint8_t* d, size_t n, std::string&) override {
+            dem_.insert(dem_.end(), d, d + n);
+            return true;
+        }
+        bool finish(tg::ChunkLocation& out, std::string& error) override {
+            std::this_thread::sleep_for(std::chrono::milliseconds(b_.nghiMs));
+            if (!xong_) { --b_.dangDay; xong_ = true; }
+            if (stt_ == b_.manhHong) {
+                error = "Tải phần 9/9 thất bại: Lỗi máy chủ: 500 RPC_CALL_FAIL";
+                return false;
+            }
+            std::lock_guard<std::mutex> lk(b_.mu);
+            out.documentId = 1000 + stt_;
+            out.messageId = 2000 + stt_;
+            out.accessHash = 3000 + stt_;
+            out.dcId = 2;
+            out.accountId = 1 + (stt_ % 4);      // giả lập 4 tài khoản luân phiên
+            b_.noiDung[out.documentId] = dem_;
+            return true;
+        }
+        void abort() override { if (!xong_) { --b_.dangDay; xong_ = true; } }
+        uint64_t written() const override { return dem_.size(); }
+        std::string sourceLabel() const override {
+            return "acc-" + std::to_string(1 + (stt_ % 4));
+        }
+
+    private:
+        BackendDemSongSong& b_;
+        int stt_;
+        Bytes dem_;
+        bool xong_ = false;
+    };
+
+    std::string name() const override { return "giả lập song song"; }
+    bool ready(std::string&) const override { return true; }
+    std::unique_ptr<tg::ChunkWriter> beginChunk(uint64_t, const std::string& ten,
+                                                std::string&) override {
+        // Chạy song song thì THỨ TỰ GỌI beginChunk không còn là thứ tự mảnh —
+        // luồng nào giành được trước thì gọi trước. Muốn cho đúng mảnh số N
+        // hỏng thì phải đọc số hiệu từ tên mảnh ("<phiên>.pNNNN"), chứ đếm số
+        // lần gọi là cho hỏng nhầm mảnh khác.
+        ++soManh;
+        int stt = 0;
+        size_t p = ten.rfind(".p");
+        if (p != std::string::npos) stt = std::atoi(ten.c_str() + p + 2);
+        return std::unique_ptr<tg::ChunkWriter>(new Writer(*this, stt));
+    }
+    bool readRange(tg::ChunkLocation& loc, uint64_t offset, uint32_t limit, Bytes& out,
+                   std::string& error) override {
+        std::lock_guard<std::mutex> lk(mu);
+        auto it = noiDung.find(loc.documentId);
+        if (it == noiDung.end()) { error = "không có mảnh"; return false; }
+        if (offset >= it->second.size()) { out.clear(); return true; }
+        size_t n = std::min<size_t>(limit, it->second.size() - offset);
+        out.assign(it->second.begin() + offset, it->second.begin() + offset + n);
+        return true;
+    }
+    bool removeChunks(const std::vector<tg::ChunkLocation>& ds, std::string&) override {
+        soManhBiXoa += static_cast<int>(ds.size());
+        return true;
+    }
+    tg::BackendStats stats() const override { return tg::BackendStats(); }
+};
+
+// Dựng một UploadManager thật với cấu hình chỉ định, đẩy `tong` byte qua đúng
+// đường receive()/complete(), rồi trả lại tệp đã ghi.
+void testDaySongSong() {
+    nhom("Đẩy nhiều mảnh song song");
+
+    std::string thuMuc = "ttd_test_song_song";
+    removeDirectoryRecursive(thuMuc);
+    ensureDirectoryExists(thuMuc);
+    std::string loi;
+    db::DatabaseConfig dcfg;
+    dcfg.kind = "sqlite";
+    dcfg.sqlitePath = joinPath(thuMuc, "test.db");
+    auto database = db::createDatabase(dcfg, loi);
+    kiem(database != nullptr && database->open(loi) && database->migrate(loi),
+         "dựng CSDL tạm", loi);
+    if (!database) return;
+
+    // Config là singleton (hàm dựng riêng tư) nên mượn bản dùng chung rồi trả
+    // lại nguyên trạng, kẻo các phép kiểm sau bị lây cấu hình của phép kiểm này.
+    Config& cfg = Config::instance();
+    auto luuCu = cfg.storage;
+    struct TraLai {
+        Config& c;
+        decltype(luuCu) cu;
+        ~TraLai() { c.storage = cu; }
+    } traLai{cfg, luuCu};
+
+    cfg.storage.chunkSize = 64 * 1024;
+    cfg.storage.bufferMode = "memory";
+    cfg.storage.parallelChunks = 4;
+    cfg.storage.memoryBudget = 64ull * 1024 * 1024;
+    cfg.storage.spoolDirectory = joinPath(thuMuc, "spool");
+    cfg.storage.deduplicate = false;
+
+    BackendDemSongSong backend;
+    storage::StorageEngine engine(*database, backend, cfg);
+    storage::UploadManager uploads(engine, *database, cfg);
+
+    // 9 mảnh: 8 mảnh đầy + 1 mảnh đuôi lẻ, để bắt luôn lỗi xử lý mảnh cuối.
+    const uint64_t tong = 8 * cfg.storage.chunkSize + 12345;
+    Bytes goc(tong);
+    for (uint64_t i = 0; i < tong; ++i) goc[i] = static_cast<uint8_t>((i * 31 + 7) & 0xff);
+
+    storage::UploadInitRequest ur;
+    ur.name = "phim.mkv";
+    ur.targetFolderPath = "/";
+    ur.totalSize = tong;
+    ur.ownerId = 1;
+    ur.policy = storage::ConflictPolicy::Replace;
+    storage::UploadInitResult init = uploads.begin(ur);
+    kiem(init.ok, "mở được phiên tải lên", init.error);
+    if (!init.ok) return;
+
+    auto phien = uploads.find(init.uploadId);
+    kiem(phien != nullptr, "tìm được phiên");
+    if (!phien) return;
+
+    // Gửi thành từng gói 7 KB cho lệch hẳn ranh giới mảnh.
+    size_t buoc = 7 * 1024;
+    bool oke = true;
+    for (uint64_t off = 0; off < tong && oke; off += buoc) {
+        size_t n = static_cast<size_t>(std::min<uint64_t>(buoc, tong - off));
+        oke = phien->receive(goc.data() + off, n, loi);
+    }
+    kiem(oke, "nhận hết dữ liệu", loi);
+    kiem(phien->receivedBytes() == tong, "nhận đủ số byte",
+         std::to_string(phien->receivedBytes()));
+
+    db::FileEntry ra;
+    kiem(uploads.complete(init.uploadId, ra, loi), "hoàn tất phiên", loi);
+
+    // ĐÂY là phép kiểm cốt lõi: có thật sự chồng mảnh không.
+    kiem(backend.dinhCaoDongThoi.load() >= 2, "có ít nhất 2 mảnh bay cùng lúc",
+         "đỉnh cao = " + std::to_string(backend.dinhCaoDongThoi.load()));
+    kiem(backend.dinhCaoDongThoi.load() <= 4, "không vượt quá số mảnh song song đã đặt",
+         "đỉnh cao = " + std::to_string(backend.dinhCaoDongThoi.load()));
+
+    // Mảnh phải nằm đúng thứ tự và liền mạch — sai chỗ này là tệp hỏng âm thầm.
+    std::vector<db::ChunkEntry> ds;
+    kiem(database->listChunks(ra.id, ds, loi), "đọc lại danh sách mảnh", loi);
+    kiem(ds.size() == 9, "đủ 9 mảnh", std::to_string(ds.size()));
+    bool thuTuDung = true, lienMach = true;
+    uint64_t mong = 0;
+    for (size_t i = 0; i < ds.size(); ++i) {
+        if (ds[i].index != static_cast<int>(i)) thuTuDung = false;
+        if (ds[i].offset != mong) lienMach = false;
+        mong += ds[i].size;
+    }
+    kiem(thuTuDung, "mảnh đánh số đúng thứ tự 0..8");
+    kiem(lienMach, "vị trí các mảnh liền mạch, không hở không chồng");
+    kiem(mong == tong, "tổng kích thước các mảnh bằng kích thước tệp",
+         std::to_string(mong) + " / " + std::to_string(tong));
+
+    // Và quan trọng nhất: đọc ngược lại phải ra ĐÚNG tệp gốc.
+    Bytes doc;
+    uint64_t daDoc = engine.readFileRange(ra, 0, tong, doc, loi);
+    kiem(daDoc == tong && doc.size() == tong, "đọc lại đủ byte", loi);
+    kiem(doc == goc, "nội dung đọc về khớp từng byte với tệp gốc");
+
+    uint8_t bamGoc[32], bamRa[32];
+    crypto::Sha256 h1, h2;
+    h1.update(goc.data(), goc.size());
+    h1.finish(bamGoc);
+    h2.update(doc.data(), doc.size());
+    h2.finish(bamRa);
+    kiem(std::memcmp(bamGoc, bamRa, 32) == 0, "SHA-256 tệp gốc và tệp đọc về khớp");
+
+    database->close();
+    removeDirectoryRecursive(thuMuc);
+}
+
+// ---------------------------------------------------------------------------
+// Mốc nối lại khi một mảnh GIỮA hỏng.
+//
+// Đây là phép kiểm đắt giá nhất trong cả bộ: chạy song song thì mảnh 5 có thể
+// xong trước mảnh 3. Nếu mốc nối lại lấy theo "số byte đã nhận" thì lượt gửi
+// sau nối tiếp từ một chỗ mà mảnh 3 chưa hề nằm trên Telegram — tệp hỏng, và
+// không có gì báo. Mốc phải lùi về đúng cuối mảnh 2.
+void testMocNoiLaiKhiManhGiuaHong() {
+    nhom("Mốc nối lại khi một mảnh giữa hỏng");
+
+    std::string thuMuc = "ttd_test_manh_hong";
+    removeDirectoryRecursive(thuMuc);
+    ensureDirectoryExists(thuMuc);
+    std::string loi;
+    db::DatabaseConfig dcfg;
+    dcfg.kind = "sqlite";
+    dcfg.sqlitePath = joinPath(thuMuc, "test.db");
+    auto database = db::createDatabase(dcfg, loi);
+    kiem(database != nullptr && database->open(loi) && database->migrate(loi),
+         "dựng CSDL tạm", loi);
+    if (!database) return;
+
+    Config& cfg = Config::instance();
+    auto luuCu = cfg.storage;
+    struct TraLai {
+        Config& c;
+        decltype(luuCu) cu;
+        ~TraLai() { c.storage = cu; }
+    } traLai{cfg, luuCu};
+
+    const uint64_t coManh = 32 * 1024;
+    cfg.storage.chunkSize = coManh;
+    cfg.storage.bufferMode = "memory";
+    cfg.storage.parallelChunks = 4;
+    cfg.storage.memoryBudget = 64ull * 1024 * 1024;
+    cfg.storage.spoolDirectory = joinPath(thuMuc, "spool");
+    cfg.storage.deduplicate = false;
+
+    BackendDemSongSong backend;
+    backend.manhHong = 3;         // mảnh thứ 4 (đánh số từ 0) cố tình hỏng
+    backend.nghiMs = 15;
+    storage::StorageEngine engine(*database, backend, cfg);
+    storage::UploadManager uploads(engine, *database, cfg);
+
+    const uint64_t tong = 10 * coManh;
+    Bytes goc(tong);
+    for (uint64_t i = 0; i < tong; ++i) goc[i] = static_cast<uint8_t>((i * 17 + 3) & 0xff);
+
+    storage::UploadInitRequest ur;
+    ur.name = "to.bin";
+    ur.targetFolderPath = "/";
+    ur.totalSize = tong;
+    ur.ownerId = 1;
+    ur.policy = storage::ConflictPolicy::Replace;
+    storage::UploadInitResult init = uploads.begin(ur);
+    kiem(init.ok, "mở được phiên", init.error);
+    if (!init.ok) return;
+    auto phien = uploads.find(init.uploadId);
+    if (!phien) { kiem(false, "tìm được phiên"); return; }
+
+    bool gapLoi = false;
+    for (uint64_t off = 0; off < tong; off += 8192) {
+        size_t n = static_cast<size_t>(std::min<uint64_t>(8192, tong - off));
+        if (!phien->receive(goc.data() + off, n, loi)) { gapLoi = true; break; }
+    }
+    kiem(gapLoi, "mảnh hỏng làm lượt nhận dừng lại");
+    kiem(loi.find("RPC_CALL_FAIL") != std::string::npos,
+         "lỗi báo lên đúng nguyên nhân từ Telegram", loi);
+
+    // Chốt sổ — đây là thứ tầng HTTP gọi trước khi đọc mốc nối lại.
+    phien->chotSoTruocKhiNoi();
+
+    uint64_t moc = phien->receivedBytes();
+    kiem(moc % coManh == 0, "mốc nối lại nằm đúng ranh giới mảnh",
+         std::to_string(moc));
+    kiem(moc <= 3 * coManh, "mốc KHÔNG vượt qua mảnh hỏng (mảnh #3)",
+         std::to_string(moc) + " byte = " + std::to_string(moc / coManh) + " mảnh");
+
+    // Và băm tại mốc đó phải khớp với băm của đúng ngần ấy byte đầu tệp — nếu
+    // sai, WebDAV sẽ từ chối nối lại (409) hoặc tệ hơn là nối nhầm chỗ.
+    Bytes bamPhien = phien->digestSoFar();
+    crypto::Sha256 h;
+    h.update(goc.data(), static_cast<size_t>(moc));
+    uint8_t bamMong[32];
+    h.finish(bamMong);
+    kiem(bamPhien.size() == 32 && std::memcmp(bamPhien.data(), bamMong, 32) == 0,
+         "băm tại mốc khớp đúng phần đầu tệp — nối lại không lệch byte nào");
+
+    // Huỷ phiên: mọi mảnh đã đẩy phải được thu hồi, không sót luồng nền nào.
+    int truocKhiHuy = backend.soManhBiXoa.load();
+    uploads.cancel(init.uploadId, "kết thúc phép kiểm");
+    kiem(backend.soManhBiXoa.load() > truocKhiHuy, "huỷ phiên thì dọn mảnh đã đẩy",
+         std::to_string(backend.soManhBiXoa.load()) + " mảnh");
+    kiem(backend.dangDay.load() == 0, "không còn luồng nền nào đang đẩy dở",
+         std::to_string(backend.dangDay.load()));
+
+    database->close();
+    removeDirectoryRecursive(thuMuc);
+}
+
+// ---------------------------------------------------------------------------
 void testLoiBaoCho() {
     nhom("Nhận diện lỗi \"chờ chút rồi làm lại\"");
     int giay = -1;
@@ -1181,6 +1487,8 @@ int main() {
     testMysqlThoat();
     testCoSoDuLieu();
     testDoiTaiKhoanKhiDoc();
+    testDaySongSong();
+    testMocNoiLaiKhiManhGiuaHong();
     testLoiBaoCho();
     testThongBaoTaiKhoan();
     testCauHinh();
