@@ -764,13 +764,21 @@ void registerApiRoutes(HttpServer& server, app::App& app) {
         // đúng để trình duyệt cắt lại cho khớp.
         std::string offsetHeader = req.header("X-Upload-Offset");
         if (!offsetHeader.empty()) {
-            // Chốt sổ trước khi đọc mốc: đẩy song song thì receivedBytes() chạy
-            // trước tới vài mảnh so với phần thật sự đã nằm trên Telegram. Không
-            // chốt thì ta bảo trình duyệt "gửi tiếp từ byte N" trong khi mảnh
-            // chứa byte N-1 vừa hỏng ở luồng nền — tệp thủng lỗ, băm vẫn khớp.
-            session->chotSoTruocKhiNoi();
             uint64_t want = session->receivedBytes();
             uint64_t got = strtoull(offsetHeader.c_str(), nullptr, 10);
+            if (got != want) {
+                // KHỚP thì đi thẳng, không chốt sổ. Trình duyệt gửi tiêu đề này
+                // ở MỌI khối 8 MB, nên chốt sổ ở đây là mỗi khối lại đợi hết
+                // mảnh đang bay hạ cánh — tức là giết sạch tính song song, biến
+                // nó thành tuần tự mà lại còn giật cục.
+                //
+                // Chỉ khi LỆCH mới cần sự thật: lệch có thể vì máy khách nối
+                // lại sai chỗ, mà cũng có thể vì một mảnh đang bay vừa hỏng và
+                // mốc đã lùi. Chốt sổ rồi hỏi lại — nếu vẫn lệch thì trả 409
+                // kèm vị trí đúng để trình duyệt cắt lại.
+                session->chotSoTruocKhiNoi();
+                want = session->receivedBytes();
+            }
             if (got != want) {
                 Json j = Json::object();
                 j.set("ok", false);
