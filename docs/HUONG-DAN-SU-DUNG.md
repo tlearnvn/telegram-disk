@@ -358,10 +358,25 @@ và vẫn đọc bình thường.
 ### Số mảnh song song
 
 Đây là nút đáng chỉnh nhất nếu bạn hay gặp `FLOOD_PREMIUM_WAIT`, vì giới hạn tần
-suất của Telegram tính **theo từng tài khoản**. Để 1 thì dù có mười tài khoản,
-mỗi lúc cũng chỉ một tài khoản gánh — nó ăn giới hạn còn chín tài khoản kia ngồi
-chơi. Để 4 thì cùng lượng byte ấy chia cho bốn tài khoản, mỗi tài khoản đẩy bằng
-¼ tốc độ và chạm ngưỡng ít đi bấy nhiêu lần.
+suất của Telegram tính **theo từng tài khoản**.
+
+Nói cho đúng trước đã, kẻo hiểu nhầm: **để 1 KHÔNG có nghĩa là một tài khoản
+gánh hết.** Mỗi mảnh đều chọn tài khoản lại từ đầu, và phép chọn xoay vòng, nên
+mười mảnh đi qua mười tài khoản khác nhau. Cái mà "để 1" đánh mất là **tính đồng
+thời**: mỗi lúc chỉ một tài khoản đang làm việc.
+
+Và đó mới là lý do thật để tăng nút này:
+
+| | Để 1 (tuần tự) | Để 4 (song song) |
+|---|---|---|
+| Mảnh chia cho các tài khoản | có, xoay vòng | có, xoay vòng |
+| Số tài khoản làm việc cùng lúc | **1** | **4** |
+| Tốc độ trần | tốc độ 1 tài khoản | ~4 lần |
+| Khi một tài khoản dính `FLOOD_WAIT` | **cả lượt tải đứng im** | ba tài khoản kia vẫn đẩy tiếp |
+
+Nghĩa là tăng số mảnh song song **không làm `FLOOD_WAIT` xuất hiện ít đi** — mỗi
+tài khoản đang đẩy vẫn đẩy hết sức nên vẫn chạm ngưỡng như thường. Nó làm cho
+mỗi lần chạm ngưỡng **rẻ đi**, vì phần còn lại của nhóm không phải đứng chờ theo.
 
 **Cái giá là chỗ đệm.** Đẩy song song cần giữ trọn mảnh ở đâu đó trước khi giao
 cho luồng nền, nên tốn *số mảnh × cỡ mảnh*:
@@ -551,11 +566,14 @@ Từ bản này ứng dụng tự chờ rồi làm lại, và **phần đã tả
 nối tiếp. Tải bằng WebDAV cũng vậy: máy chủ trả 503 kèm `Retry-After`, rclone hay
 davfs2 sẽ chờ đúng số giây đó rồi gửi lại, và máy chủ nối tiếp từ chỗ đã dừng.
 
-Muốn đỡ gặp thì **tăng Số mảnh song song** trong Cài đặt. Nghe ngược đời, nhưng
-giới hạn tần suất tính **theo từng tài khoản**: mười tài khoản mà đẩy tuần tự thì
-vẫn chỉ một tài khoản gánh, còn chín tài khoản kia ngồi chơi. Chia cùng lượng
-byte đó cho bốn tài khoản thì mỗi tài khoản chỉ đẩy bằng ¼ tốc độ, và chạm ngưỡng
-ít đi bấy nhiêu lần. Xem mục [Số mảnh song song](#số-mảnh-song-song) bên dưới.
+Gặp thông báo này là **bình thường**, không phải hỏng — chương trình tự chờ đúng
+số giây Telegram yêu cầu rồi gửi tiếp.
+
+Muốn nó **ít làm chậm mình** thì **tăng Số mảnh song song** trong Cài đặt. Lưu ý
+cho đúng: làm vậy *không* khiến `FLOOD_PREMIUM_WAIT` xuất hiện thưa hơn — tài
+khoản nào đang đẩy cũng đẩy hết sức nên vẫn chạm ngưỡng như thường. Cái được là
+khi một tài khoản phải ngồi chờ thì những tài khoản còn lại **vẫn đẩy tiếp**,
+thay vì cả lượt tải đứng im. Xem mục [Số mảnh song song](#số-mảnh-song-song).
 
 > Bản trước bản này báo `507 Insufficient Storage` rồi huỷ cả lượt tải — đó là
 > lỗi của ứng dụng, không phải máy chủ hết chỗ. Đã sửa.

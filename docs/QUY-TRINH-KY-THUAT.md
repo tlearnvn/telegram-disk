@@ -614,11 +614,29 @@ mạng không ổn định, cái thứ hai đáng giá hơn cái thứ nhất.
 
 ### Đẩy nhiều mảnh song song
 
-Giới hạn tần suất của Telegram tính **theo từng tài khoản**. Nên mười tài khoản
-mà đẩy tuần tự thì vẫn chỉ một tài khoản gánh tại một thời điểm — nó ăn
-`FLOOD_PREMIUM_WAIT` trong khi chín tài khoản kia ngồi chơi. Chia cùng lượng byte
-đó cho bốn tài khoản thì mỗi tài khoản chỉ đẩy bằng ¼ tốc độ, và chạm ngưỡng ít
-đi bấy nhiêu lần.
+Giới hạn tần suất của Telegram tính **theo từng tài khoản**. Nhưng phải nói rõ
+một chuyện hay bị hiểu nhầm trước: **đẩy tuần tự KHÔNG dồn hết vào một tài
+khoản.** `openChunk()` gọi `beginChunk()` lại cho TỪNG mảnh, mà `pickAccount()`
+có con đếm xoay vòng (`roundRobin_.fetch_add(1)`), nên khi mọi tài khoản cùng
+rảnh — đúng cảnh của đường tuần tự, vì mỗi lúc chỉ có một mảnh đang bay — thì
+mảnh 1 đi tài khoản A, mảnh 2 đi B, mảnh 3 đi C… Đo bằng phép kiểm gọi thẳng
+`pickAccount()`: 12 mảnh, 4 tài khoản, ra đúng **3 mảnh mỗi tài khoản**; bỏ dòng
+xoay vòng đi thì thành `acc-1=12`.
+
+Vậy tuần tự mất gì? Mất **tính đồng thời**, và đó là tất cả:
+
+| | Tuần tự | 4 mảnh song song |
+|---|---|---|
+| Mảnh trải đều các tài khoản | có | có |
+| Tài khoản làm việc cùng lúc | 1 | 4 |
+| Tốc độ trần | 1 tài khoản | ~4 lần |
+| Một tài khoản dính `FLOOD_WAIT` | cả lượt tải đứng | ba anh kia đẩy tiếp |
+
+Nên phát biểu cho chuẩn: chạy song song **không làm `FLOOD_PREMIUM_WAIT` thưa
+đi** — tài khoản nào đang đẩy cũng đẩy hết sức nên vẫn chạm ngưỡng như thường.
+Nó làm mỗi lần chạm ngưỡng **rẻ đi**, vì `pickAccount()` bỏ qua tài khoản đang
+chờ (`statusText() == "Đang chờ giới hạn tần suất"`) và phần còn lại của nhóm
+vẫn chạy.
 
 ```mermaid
 flowchart LR

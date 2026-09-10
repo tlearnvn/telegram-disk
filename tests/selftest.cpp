@@ -1125,6 +1125,78 @@ void testDaySongSong() {
 }
 
 // ---------------------------------------------------------------------------
+// Chọn tài khoản: đẩy TUẦN TỰ vẫn phải xoay vòng qua các tài khoản.
+//
+// Dễ tưởng "tuần tự = một tài khoản gánh hết", vì mỗi lúc chỉ có một mảnh đang
+// bay nên tài khoản nào cũng rảnh như nhau, và cứ chọn "rảnh nhất" thì luôn ra
+// đúng một anh. Nếu vậy thật thì một tài khoản ăn trọn hạn mức còn cả nhóm ngồi
+// chơi — đúng cái cảnh mà nhiều tài khoản sinh ra để tránh.
+//
+// Thứ cứu tình huống đó là con đếm xoay vòng trong pickAccount(). Phép kiểm này
+// gọi thẳng pickAccount() với các tài khoản rảnh y hệt nhau và đếm phân bố.
+void testXoayVongTaiKhoan() {
+    nhom("Chọn tài khoản xoay vòng khi các tài khoản cùng rảnh");
+
+    tg::TlSchema schema;
+    tg::AppInfo appInfo;
+    appInfo.apiId = 12345;
+    appInfo.apiHash = "0123456789abcdef0123456789abcdef";
+    tg::AccountPool pool(schema, appInfo);
+
+    const int soTaiKhoan = 4;
+    for (int i = 1; i <= soTaiKhoan; ++i) {
+        tg::TgAccountConfig c;
+        c.id = i;
+        c.label = "acc-" + std::to_string(i);
+        tg::TgAccount* a = pool.addAccount(c);
+        kiem(a != nullptr, "thêm được tài khoản giả " + c.label);
+        if (a) a->setAuthorized(true);   // chưa kết nối, nhưng đã coi là đăng nhập
+    }
+    kiem(pool.accountCount() == soTaiKhoan, "pool có đủ 4 tài khoản",
+         std::to_string(pool.accountCount()));
+
+    // Mô phỏng đúng đường TUẦN TỰ: mở mảnh → chọn tài khoản → đẩy xong → nhả ra.
+    // Nghĩa là mỗi lượt chọn đều thấy MỌI tài khoản đang rảnh (tải = 0).
+    std::map<int, int> dem;
+    std::string loi;
+    const int soManh = 12;
+    for (int i = 0; i < soManh; ++i) {
+        tg::TgAccount* a = pool.pickAccount(loi);
+        kiem(a != nullptr, "chọn được tài khoản cho mảnh " + std::to_string(i + 1), loi);
+        if (!a) return;
+        pool.noteUploadStarted(a->id());
+        dem[a->id()]++;
+        pool.noteUploadFinished(a->id());   // tuần tự: xong mảnh này mới sang mảnh sau
+    }
+
+    kiem(dem.size() == static_cast<size_t>(soTaiKhoan),
+         "cả 4 tài khoản đều được giao việc, không dồn vào một anh",
+         "số tài khoản dùng tới = " + std::to_string(dem.size()));
+    bool deu = true;
+    std::string bang;
+    for (const auto& kv : dem) {
+        bang += " acc-" + std::to_string(kv.first) + "=" + std::to_string(kv.second);
+        if (kv.second != soManh / soTaiKhoan) deu = false;
+    }
+    kiem(deu, "12 mảnh chia đều 3 mảnh mỗi tài khoản", bang);
+
+    // Và khi CÓ mảnh đang bay thật (đường song song), phép chọn phải tránh những
+    // tài khoản đang bận chứ không xoay vòng mù.
+    tg::TgAccount* a1 = pool.pickAccount(loi);
+    if (!a1) return;
+    pool.noteUploadStarted(a1->id());
+    bool traNhamNguoiBan = false;
+    for (int i = 0; i < soTaiKhoan - 1; ++i) {
+        tg::TgAccount* a = pool.pickAccount(loi);
+        if (!a) break;
+        if (a->id() == a1->id()) traNhamNguoiBan = true;
+        pool.noteUploadStarted(a->id());
+    }
+    kiem(!traNhamNguoiBan, "không giao thêm việc cho tài khoản đang bận"
+                           " khi vẫn còn tài khoản rảnh");
+}
+
+// ---------------------------------------------------------------------------
 // Hỏi tiến độ trong lúc dòng vào đang bị CHẶN.
 //
 // Khi vùng đệm đã đầy, receive() phải đứng đợi mảnh đầu hàng lên xong — đó là
@@ -1799,6 +1871,7 @@ int main() {
     testCoSoDuLieu();
     testDoiTaiKhoanKhiDoc();
     testDaySongSong();
+    testXoayVongTaiKhoan();
     testHoiTienDoLucNghen();
     testMocNoiLaiKhiManhGiuaHong();
     testHongLucHoanTatKhongXoaMang();
