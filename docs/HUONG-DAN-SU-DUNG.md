@@ -352,8 +352,25 @@ Những mục hay dùng nhất:
 | **Nơi lưu trữ** | Telegram | Đổi sang *nội bộ* để chạy thử không cần Telegram |
 | **Cơ sở dữ liệu** | SQLite | Hoặc MySQL/MariaDB. Đổi xong phải khởi động lại |
 
-Đổi cỡ mảnh chỉ ảnh hưởng tệp tải lên **sau đó**. Tệp cũ giữ nguyên cách cắt cũ
-và vẫn đọc bình thường.
+### Đổi cỡ mảnh giữa chừng có sao không?
+
+**Không sao cả** — kể cả khi đang có người tải lên. Mỗi tệp ghi sẵn **vị trí và
+độ dài của từng mảnh riêng của nó** vào cơ sở dữ liệu, và lúc đọc thì dò theo
+đúng bảng đó chứ không hề ngó tới cài đặt hiện thời. Máy chủ cũng không đòi các
+tệp phải cắt giống nhau.
+
+| Ai | Chuyện gì xảy ra |
+|---|---|
+| Tệp đã tải lên xong | giữ nguyên cách cắt cũ, đọc/tải/tua vẫn bình thường |
+| Lượt tải **đang chạy** | giữ nguyên cỡ mảnh lúc nó bắt đầu, chạy nốt cho trọn |
+| Tệp tải lên sau đó | dùng cỡ mảnh mới |
+
+Đo thật cho chắc: tải tệp A lúc để 1 MB (ra 12 mảnh), đổi sang 4 MB, tải tệp B
+(ra 3 mảnh) — cả hai đọc về khớp SHA-256 từng byte. Rồi tải tệp C và **đổi cài
+đặt ngay giữa lúc nó đang chạy**: C vẫn ra đúng 3 mảnh 4 MB đều tăm tắp, không
+lẫn cỡ, đọc về vẫn khớp.
+
+Nên cứ đổi thoải mái, không cần đợi lúc rảnh rỗi hay khởi động lại.
 
 ### Số mảnh song song
 
